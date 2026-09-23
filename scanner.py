@@ -1,6 +1,6 @@
-import os, pyotp, requests, time
+import os, pyotp, requests, time, json
 from SmartApi import SmartConnect
-import pandas as pd
+from datetime import datetime, timedelta
 
 API_KEY = os.getenv("ANGEL_API_KEY")
 CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
@@ -9,45 +9,59 @@ TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# NSE 1000 Stocks - तुझी 1000 ची list
-NSE_1000 = [
-"RELIANCE-EQ","TCS-EQ","INFY-EQ","HDFCBANK-EQ","ICICIBANK-EQ","SBIN-EQ","BHARTIARTL-EQ","ITC-EQ","KOTAKBANK-EQ","LT-EQ",
-"AXISBANK-EQ","ASIANPAINT-EQ","MARUTI-EQ","BAJFINANCE-EQ","HCLTECH-EQ","WIPRO-EQ","ULTRACEMCO-EQ","TITAN-EQ","SUNPHARMA-EQ","NESTLEIND-EQ"
-# इथे अजून 980 add करू शकतोस - मी 1000 ची full list तयार करून देईन
-]
-
-def get_ltp_smartapi(obj, symbol):
-    try:
-        # Angel ला token लागतो, सोप्यासाठी search करून घेतो
-        res = obj.searchScrip("NSE", symbol.replace("-EQ",""))
-        if res and res['data']:
-            token = res['data'][0]['symboltoken']
-            ltp = obj.ltpData("NSE", symbol.replace("-EQ",""), token)
-            return ltp['data']['ltp']
-    except:
-        return None
-    return None
+# NSE 1000 साठी Instrument Master Load करू
+def load_master():
+    url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
+    data = requests.get(url).json()
+    # फक्त NSE EQ
+    nse_eq = [s for s in data if s['exch_seg']=='NSE' and s['symbol'].endswith('-EQ')]
+    return nse_eq[:1000] # पहिले 1000
 
 def scan():
+    print("Angel Login...")
     totp = pyotp.TOTP(TOTP_SECRET).now()
     obj = SmartConnect(api_key=API_KEY)
-    session = obj.generateSession(CLIENT_ID, PASSWORD, totp)
+    obj.generateSession(CLIENT_ID, PASSWORD, totp)
 
-    results = "📊 NSE 1000 Scanner (Angel):\n\n"
-    count = 0
+    stocks = load_master()
+    print(f"Loaded {len(stocks)} stocks")
 
-    for sym in NSE_1000[:100]: # आधी 100 टेस्ट करू, नंतर 1000 करू
-        price = get_ltp_smartapi(obj, sym)
-        if price:
-            results += f"{sym} - Rs.{price}\n"
-            count += 1
-        time.sleep(0.2)
-        if count >= 50: # Telegram ला 50 एका वेळी
+    breakout = []
+    for s in stocks:
+        try:
+            symbol = s['symbol']
+            token = s['token']
+            # मागच्या 2 दिवसाची candle
+            historicParam={
+                "exchange": "NSE",
+                "symboltoken": token,
+                "interval": "ONE_DAY",
+                "fromdate": (datetime.now()-timedelta(days=5)).strftime("%Y-%m-%d %H:%M"),
+                "todate": datetime.now().strftime("%Y-%m-%d %H:%M")
+            }
+            candles = obj.getCandleData(historicParam)
+            if candles and candles['data']:
+                data = candles['data']
+                if len(data)>=2:
+                    last_close = data[-1][4]
+                    prev_high = data[-2][2]
+                    if last_close > prev_high: # Breakout Logic
+                        breakout.append(f"{symbol} - {last_close} (Breakout!)")
+        except:
+            continue
+        time.sleep(0.05)
+        if len(breakout)>=20: # Telegram ला 20 पाठवू
             break
 
+    if not breakout:
+        msg = "NSE 1000 Scanner (Angel): आज Breakout नाही, 1000 Stocks स्कॅन झाले!"
+    else:
+        msg = "🚀 NSE 1000 Breakout Scanner (Angel):\n\n" + "\n".join(breakout)
+
+    # Telegram
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": results})
-    print(f"Scanned {count} stocks")
+    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    print("Sent!")
 
 if __name__ == "__main__":
     scan()
