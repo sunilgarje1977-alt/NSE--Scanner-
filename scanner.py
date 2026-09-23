@@ -1,67 +1,66 @@
-import os, pyotp, requests, time, json
-from SmartApi import SmartConnect
+import os, time, requests, pyotp, logzero
+import pandas as pd
 from datetime import datetime, timedelta
+from SmartApi import SmartConnect
 
+# Secrets मधून Key घेणार
 API_KEY = os.getenv("ANGEL_API_KEY")
 CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
 PASSWORD = os.getenv("ANGEL_PASSWORD")
-TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TOTP_SECRET = os.getenv("ANGEL_TOTP")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
-# NSE 1000 साठी Instrument Master Load करू
-def load_master():
-    url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-    data = requests.get(url).json()
-    # फक्त NSE EQ
-    nse_eq = [s for s in data if s['exch_seg']=='NSE' and s['symbol'].endswith('-EQ')]
-    return nse_eq[:1000] # पहिले 1000
+smart = SmartConnect(api_key=API_KEY)
+smart.generateSession(CLIENT_ID, PASSWORD, pyotp.TOTP(TOTP_SECRET).now())
 
-def scan():
-    print("Angel Login...")
-    totp = pyotp.TOTP(TOTP_SECRET).now()
-    obj = SmartConnect(api_key=API_KEY)
-    obj.generateSession(CLIENT_ID, PASSWORD, totp)
+def send_tg(msg):
+    requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
 
-    stocks = load_master()
-    print(f"Loaded {len(stocks)} stocks")
+def is_strong(df):
+    l, p = df.iloc[-1], df.iloc[-2]
+    body = abs(l['close']-l['open'])
+    rng = l['high']-l['low']
+    if rng==0: return False
+    return (body/rng>0.7 and l['close']>l['open']) or (p['close']<p['open'] and l['close']>l['open'] and l['close']>p['open'])
 
-    breakout = []
-    for s in stocks:
-        try:
-            symbol = s['symbol']
-            token = s['token']
-            # मागच्या 2 दिवसाची candle
-            historicParam={
-                "exchange": "NSE",
-                "symboltoken": token,
-                "interval": "ONE_DAY",
-                "fromdate": (datetime.now()-timedelta(days=5)).strftime("%Y-%m-%d %H:%M"),
-                "todate": datetime.now().strftime("%Y-%m-%d %H:%M")
-            }
-            candles = obj.getCandleData(historicParam)
-            if candles and candles['data']:
-                data = candles['data']
-                if len(data)>=2:
-                    last_close = data[-1][4]
-                    prev_high = data[-2][2]
-                    if last_close > prev_high: # Breakout Logic
-                        breakout.append(f"{symbol} - {last_close} (Breakout!)")
-        except:
-            continue
-        time.sleep(0.05)
-        if len(breakout)>=20: # Telegram ला 20 पाठवू
-            break
+def get_candles(token, interval, days):
+    to_date = datetime.now()
+    from_date = to_date - timedelta(days=days)
+    params = {"exchange":"NSE","symboltoken":token,"interval":interval,"fromdate":from_date.strftime("%Y-%m-%d %H:%M"),"todate":to_date.strftime("%Y-%m-%d %H:%M")}
+    try:
+        data = smart.getCandleData(params)
+        return pd.DataFrame(data['data'], columns=['datetime','open','high','low','close','volume'])
+    except: return pd.DataFrame()
 
-    if not breakout:
-        msg = "NSE 1000 Scanner (Angel): आज Breakout नाही, 1000 Stocks स्कॅन झाले!"
-    else:
-        msg = "🚀 NSE 1000 Breakout Scanner (Angel):\n\n" + "\n".join(breakout)
+def scan(symbol, token):
+    df5 = get_candles(token, "FIVE_MINUTE", 2)
+    dfd = get_candles(token, "ONE_DAY", 60)
+    if len(df5)<10 or len(dfd)<30: return
+    today = datetime.now().strftime("%Y-%m-%d")
+    df5['datetime']=pd.to_datetime(df5['datetime'])
+    dft = df5[df5['datetime'].dt.strftime("%Y-%m-%d")==today]
+    if len(dft)<4: return
+    
+    curr = dft.iloc[-1]['close']
+    first3_high = dft.iloc[0:3]['high'].max() # 9:15, 9:20, 9:25
+    cond1 = curr > first3_high # 9:15 Breakout
+    cond2 = dfd['volume'].iloc[-1] > dfd['volume'].iloc[-21:-1].mean()*2 # 2x Vol
+    ema9 = dfd['close'].ewm(span=9).mean()
+    ema21 = dfd['close'].ewm(span=21).mean()
+    cond3 = ema9.iloc[-1] > ema21.iloc[-1] # 9>21
+    dft['vwap'] = (dft['close']*dft['volume']).cumsum()/dft['volume'].cumsum()
+    cond4 = curr > dft.iloc[-1]['vwap']
+    delta = dfd['close'].diff()
+    rsi = 100 - (100/(1+delta.where(delta>0,0).rolling(14).mean() / -delta.where(delta<0,0).rolling(14).mean()))
+    cond5 = rsi.iloc[-1] > 55
+    cond6 = is_strong(dft)
+    
+    if all([cond1,cond2,cond3,cond4,cond5,cond6]):
+        send_tg(f"🚀 *{symbol}* 9:15 BREAKOUT\nPrice: {curr}\nVol 2x | RSI {rsi.iloc[-1]:.1f}\nStrong Candle + VWAP Above")
+        print(symbol)
 
-    # Telegram
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
-    print("Sent!")
-
-if __name__ == "__main__":
-    scan()
+# तुझी NSE List - इथे Token टाक
+for s in [{"symbol":"SAIL","token":"758"},{"symbol":"BHEL","token":"438"}]:
+    scan(s["symbol"], s["token"])
+    time.sleep(0.4)
