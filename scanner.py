@@ -160,3 +160,17 @@ def main():
 
 if __name__ == "__main__":
     main()
+def daily_report():
+    # 3:30 चा Report
+    try:
+        total_pnl = 0
+        msg = "📊 *आजचा SENSEX 1000 Report*\n\n"
+        for sym, pos in active_positions.items():
+            ltp = smartApi.ltpData("NSE", f"{sym}-EQ", pos["token"])['data']['ltp']
+            pnl = (ltp - pos['entry']) * (CAPITAL_PER_TRADE / pos['entry'])
+            total_pnl += pnl
+            msg += f"{sym}: {pnl:.0f} Rs\n"
+        
+        msg += f"\nTotal Trades: {total_trades_done}/6\nTotal P&L: {total_pnl:.0f} Rs\nActive: {active_trades}"
+        send_telegram(msg)
+    except: pass
