@@ -1,7 +1,7 @@
 name: Daily Scanner
 on:
   schedule:
-    - cron: '30 3 * * 1-5'
+    - cron: '45 3 * * 1-5'
   workflow_dispatch:
 jobs:
   scan:
@@ -14,9 +14,9 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python scanner.py
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
-          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+          ANGEL_TOTP: ${{ secrets.ANGEL_TOTP }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
