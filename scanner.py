@@ -1,89 +1,124 @@
-import os, requests, talib
-import pandas as pd
+import os, time, requests, traceback
 from datetime import datetime
+import pandas as pd
+import talib
+from SmartApi import SmartConnect
 
-# ========== TELEGRAM SETUP ==========
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-def send_telegram(msg):
-    try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
-    except: pass
+# ===== CONFIG =====
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
+API_KEY = os.getenv("ANGEL_API_KEY")
+CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
+PASSWORD = os.getenv("ANGEL_PASSWORD")
+TOTP_SECRET = os.getenv("ANGEL_TOTP")
 
-# ========== CONFIG - तुझं सगळं इथे ==========
-TOTAL_CAPITAL = 30000 # तुझं Capital इथे बदल
+CAPITAL_TOTAL = 30000
+CAPITAL_PER_TRADE = 5000
 MAX_TRADES = 6
 ACTIVE_LIMIT = 2
-CAPITAL_PER_TRADE = (TOTAL_CAPITAL * 5) / MAX_TRADES # 5x Leverage
-
-# ========== 7 FILTERS + 5 CANDLE PATTERNS ==========
-def check_rocket_stock(df_daily, df_15, symbol):
-    o,h,l,c = df_15['open'], df_15['high'], df_15['low'], df_15['close']
-    price = c.iloc[-1]
-
-    # Filter 0: Price 50-1500
-    if not (50 <= price <= 1500): return False, ""
-
-    # 1: First 15 Min Break
-    if price <= df_15['high'].iloc[0]: return False, ""
-
-    # 2: Volume 2x (20 Days)
-    avg_vol = df_daily['volume'].rolling(20).mean().iloc[-1]
-    if df_daily['volume'].iloc[-1] < 2 * avg_vol: return False, ""
-
-    # 3: 9 EMA Cross 21 EMA
-    ema9, ema21 = talib.EMA(c, 9), talib.EMA(c, 21)
-    if not (ema9.iloc[-2] < ema21.iloc[-2] and ema9.iloc[-1] > ema21.iloc[-1]): return False, ""
-
-    # 4: Price > VWAP
-    vwap = (c * df_15['volume']).cumsum() / df_15['volume'].cumsum()
-    if price <= vwap.iloc[-1]: return False, ""
-
-    # 5: Strong Candle Body > 60%
-    body = abs(c.iloc[-1] - o.iloc[-1])
-    rng = h.iloc[-1] - l.iloc[-1]
-    if rng == 0 or (body/rng) < 0.6: return False, ""
-
-    # 6: RSI > 55
-    rsi = talib.RSI(c, 14).iloc[-1]
-    if rsi <= 55: return False, ""
-
-    # 7: Pivot Breakout (H+L+C)/3
-    H, L, C = df_daily['high'].iloc[-2], df_daily['low'].iloc[-2], df_daily['close'].iloc[-2]
-    pivot, R1 = (H+L+C)/3, (2*((H+L+C)/3) - L)
-    if not (price > pivot and price >= R1*0.98): return False, ""
-
-    # 8: तुझे 5 Candle Patterns
-    is_hammer = talib.CDLHAMMER(o,h,l,c).iloc[-1]!= 0
-    is_engulf = talib.CDLENGULFING(o,h,l,c).iloc[-1] > 0
-    is_marubozu = talib.CDLMARUBOZU(o,h,l,c).iloc[-1] > 0
-    is_mstar = talib.CDLMORNINGSTAR(o,h,l,c).iloc[-1]!= 0
-    is_3sold = talib.CDL3WHITESOLDIERS(o,h,l,c).iloc[-1]!= 0
-
-    pattern = ""
-    if is_hammer: pattern="HAMMER 🔨"
-    elif is_engulf: pattern="ENGULFING 🚀"
-    elif is_marubozu: pattern="MARUBOZU 💪"
-    elif is_mstar: pattern="MORNING STAR ⭐"
-    elif is_3sold: pattern="3 SOLDIERS ⚔️"
-    else: return False, ""
-
-    return True, pattern
-
-# ========== ORDER + QUEUE LOGIC (2 Active, Trailing SL) ==========
 active_trades = 0
 total_trades_done = 0
 
-def place_order_final(symbol, price, pattern):
+def send_telegram(msg):
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+    except: pass
+
+# ===== ANGEL LOGIN =====
+smartApi = SmartConnect(api_key=API_KEY)
+try:
+    import pyotp
+    totp = pyotp.TOTP(TOTP_SECRET).now()
+    smartApi.generateSession(CLIENT_ID, PASSWORD, totp)
+    print("Angel Login Success")
+except Exception as e:
+    print(f"Login Fail: {e}")
+
+# ===== SCANNER LOGIC =====
+def check_rocket_stock(df_15, df_daily):
+    try:
+        # Filter 1: Price 50 to 1500
+        price = df_15['close'].iloc[-1]
+        if not (50 <= price <= 1500):
+            return None
+
+        # Filter 2: Volume 2X (20 Days) - TUMCHI DEMAND
+        avg_vol = df_daily['volume'].rolling(20).mean().iloc[-1]
+        curr_vol = df_daily['volume'].iloc[-1]
+        if curr_vol < 2 * avg_vol:
+            return None
+
+        # Filter 3: First 15 Min High Break
+        first_high = df_15['high'].iloc[0]
+        if price < first_high:
+            return None
+
+        # Filter 4: 5 Candle Patterns (TA-Lib)
+        open_p, high_p, low_p, close_p = df_15['open'], df_15['high'], df_15['low'], df_15['close']
+        patterns = {
+            "Bullish Engulfing": talib.CDLENGULFING(open_p, high_p, low_p, close_p).iloc[-1] == 100,
+            "Hammer": talib.CDLHAMMER(open_p, high_p, low_p, close_p).iloc[-1] == 100,
+            "Morning Star": talib.CDLMORNINGSTAR(open_p, high_p, low_p, close_p).iloc[-1] == 100,
+            "Piercing": talib.CDLPIERCING(open_p, high_p, low_p, close_p).iloc[-1] == 100,
+            "3 White Soldiers": talib.CDL3WHITESOLDIERS(open_p, high_p, low_p, close_p).iloc[-1] == 100,
+        }
+        found_pattern = [k for k,v in patterns.items() if v]
+        if not found_pattern:
+            return None
+
+        # ===== TUMCHI SL LOGIC: छोट्या Candle चा Low =====
+        df_prev = df_15.iloc[-6:-1].copy()
+        df_prev['body'] = abs(df_prev['close'] - df_prev['open'])
+        smallest_low = df_prev.loc[df_prev['body'].idxmin(), 'low']
+
+        stoploss = smallest_low
+        sl_perc = (price - stoploss) * 100 / price
+
+        # Safety: SL 0.8% to 3.5% च्या आतच हवा
+        if sl_perc < 0.8 or sl_perc > 3.5:
+            stoploss = df_15['low'].iloc[-2] # जर खूप लांब असेल तर मागची Candle Low
+
+        target = price + (price - stoploss) * 2 # 1:2 Risk Reward
+
+        return {
+            "price": price,
+            "sl": round(stoploss, 2),
+            "target": round(target, 2),
+            "pattern": found_pattern[0],
+            "sl_perc": round(sl_perc, 2)
+        }
+    except Exception as e:
+        print(f"Check Error: {e}")
+        return None
+
+def place_order_final(symbol, info):
     global active_trades, total_trades_done
     if active_trades >= ACTIVE_LIMIT or total_trades_done >= MAX_TRADES:
+        print("Limit Reached")
         return
 
-    qty = int(CAPITAL_PER_TRADE / price)
-    # Angel API Order Place + Trailing SL 1%
-    # smartApi.placeOrder({"symbol":symbol, "qty":qty, "sl": price*0.99, "trailing":True})
+    qty = int(CAPITAL_PER_TRADE / info['price'])
+    if qty == 0: return
+
+    # --- Angel Order (आत्ता Print करतोय, हवं असेल तर Uncomment कर) ---
+    # orderparams = {"variety":"NORMAL","tradingsymbol":symbol,"symboltoken":token,"transactiontype":"BUY","exchange":"NSE","ordertype":"MARKET","producttype":"INTRADAY","duration":"DAY","quantity":qty}
+    # smartApi.placeOrder(orderparams)
 
     active_trades += 1
     total_trades_done += 1
-    msg
+
+    msg = f"🚀 BREAKOUT: {symbol}\nPrice: {info['price']}\nPattern: {info['pattern']}\nSL: {info['sl']} (छोटी Candle Low)\nTarget: {info['target']}\nRisk: {info['sl_perc']}%\nQty: {qty} | Vol 2X ✅"
+    print(msg)
+    send_telegram(msg)
+
+# ===== MAIN LOOP =====
+# इथे तुझी 1000 Stocks ची List Loop होईल
+# for symbol in nifty_1000_list:
+# df_15 = smartApi.getCandleData(...)
+# df_daily =...
+# result = check_rocket_stock(df_15, df_daily)
+# if result: place_order_final(symbol, result)
+
+# Test साठी
+send_telegram(f"NSE Scanner Started: 2X Vol + Small Candle SL Logic Active ✅ Time: {datetime.now().strftime('%H:%M')}")
