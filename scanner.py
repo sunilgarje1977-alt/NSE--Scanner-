@@ -1,4 +1,4 @@
- import os, time, requests, pyotp, yfinance as yf
+import os, time, requests, pyotp, yfinance as yf
 import pandas as pd
 from SmartApi import SmartConnect
 from datetime import datetime
