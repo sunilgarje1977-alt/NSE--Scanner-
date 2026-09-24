@@ -1,9 +1,8 @@
 name: Daily Scanner
 on:
-  workflow_dispatch:
   schedule:
     - cron: '30 3 * * 1-5'
-
+  workflow_dispatch:
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -15,13 +14,14 @@ jobs:
       - name: Install
         run: |
           pip install --upgrade pip
-          pip install yfinance pandas requests smartapi-python websocket-client logzero pyotp -q
-      - name: Run
+          pip install -r requirements.txt
+          pip install smartapi-python websocket-client logzero pyotp -q
+      - name: Run Scanner
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-          API_KEY: ${{ secrets.API_KEY }}
-          CLIENT_ID: ${{ secrets.CLIENT_ID }}
-          PASSWORD: ${{ secrets.PASSWORD }}
-          TOTP_SECRET: ${{ secrets.TOTP_SECRET }}
-        run: python main.py 
+          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scanner.py 
