@@ -1,8 +1,9 @@
 name: Daily Scanner
 on:
+  workflow_dispatch:
   schedule:
     - cron: '30 3 * * 1-5'
-  workflow_dispatch:
+
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -13,16 +14,14 @@ jobs:
           python-version: '3.10'
       - name: Install
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libta-lib-dev
-          pip install -r requirements.txt
-          pip install TA-Lib
+          pip install --upgrade pip
+          pip install yfinance pandas requests smartapi-python websocket-client logzero pyotp -q
       - name: Run
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
-          ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
-          ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
-          ANGEL_TOTP: ${{ secrets.ANGEL_TOTP }}
-        run: python scanner.py 
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          API_KEY: ${{ secrets.API_KEY }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          TOTP_SECRET: ${{ secrets.TOTP_SECRET }}
+        run: python main.py 
