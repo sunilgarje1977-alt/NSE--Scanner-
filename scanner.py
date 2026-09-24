@@ -1,9 +1,9 @@
-import yfinanceas yf, requests, os, pyotp
+import yfinance as yf
+import requests, os, pyotp
 from concurrent.futures import ThreadPoolExecutor
 from SmartApi import SmartConnect
 from datetime import datetime
 
-# Secrets
 B = os.getenv("TELEGRAM_BOT_TOKEN")
 C = os.getenv("TELEGRAM_CHAT_ID")
 API_KEY = os.getenv("ANGEL_API_KEY")
@@ -12,7 +12,8 @@ PWD = os.getenv("ANGEL_PASSWORD")
 TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
 
 def tg(m):
-    try: requests.post(f"https://api.telegram.org/bot{B}/sendMessage",data={"chat_id":C,"text":m,"parse_mode":"Markdown"},timeout=10)
+    try:
+        requests.post(f"https://api.telegram.org/bot{B}/sendMessage",data={"chat_id":C,"text":m,"parse_mode":"Markdown"},timeout=10)
     except: pass
 
 def angel_login():
@@ -21,10 +22,10 @@ def angel_login():
         api = SmartConnect(api_key=API_KEY)
         api.generateSession(CLIENT_ID, PWD, totp)
         return api
-    except Exception as e:
-        print(e); return None
+    except:
+        return None
 
-S=["RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS","SBIN.NS","BHARTIARTL.NS","ITC.NS","LT.NS","KOTAKBANK.NS","AXISBANK.NS","MARUTI.NS","WIPRO.NS","SUNPHARMA.NS","TITAN.NS","ONGC.NS","NTPC.NS","POWERGRID.NS","M&M.NS","BAJFINANCE.NS"]*50
+S=["RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS","SBIN.NS","BHARTIARTL.NS","ITC.NS","LT.NS","KOTAKBANK.NS"]*100
 
 def chk(s):
  try:
@@ -47,31 +48,19 @@ def chk(s):
   return {"sym":s.replace(".NS",""),"entry":e,"sl":sl,"tgt":tgt}
  except:return None
 
-# Scan
 with ThreadPoolExecutor(max_workers=40) as x:
     r=[i for i in x.map(chk,S) if i][:6]
 
-# Angel Auto BUY
-api = angel_login()
+api=angel_login()
 if r and api:
-    for trade in r[:2]: # एका वेळी 2 Active - Condition 10
+    for tr in r[:2]:
         try:
-            qty = int(5000/trade['entry'])
-            # Angel Order
-            api.placeOrder({
-                "variety":"NORMAL","tradingsymbol":trade['sym'],"symboltoken":"","transactiontype":"BUY",
-                "exchange":"NSE","ordertype":"MARKET","producttype":"INTRADAY","duration":"DAY","quantity":qty
-            })
-            tg(f"✅ *Angel BUY Done* {trade['sym']} Qty:{qty} E:{trade['entry']:.1f} SL:{trade['sl']:.1f}")
-        except Exception as e:
-            tg(f"⚠️ Angel Order Fail {trade['sym']} {e}")
+            qty=int(5000/tr['entry'])
+            api.placeOrder({"variety":"NORMAL","tradingsymbol":tr['sym'],"symboltoken":"","transactiontype":"BUY","exchange":"NSE","ordertype":"MARKET","producttype":"INTRADAY","duration":"DAY","quantity":qty})
+            tg(f"Angel BUY {tr['sym']} Qty:{qty}")
+        except:pass
 else:
     if r:
-        msg="🚀 *1000 Scan | Angel Login Fail - Manual BUY कर*\n\n"
-        for t in r: msg+=f"*{t['sym']}* E:{t['entry']:.1f} SL:{t['sl']:.1f} T:{t['tgt']:.1f} Trail 30%\n"
-        tg(msg)
+        tg("\n".join([f"{t['sym']} E:{t['entry']:.1f} SL:{t['sl']:.1f}" for t in r]))
     else:
-        tg(f"📊 1000 Stocks Scan Done - 0 Match")
-
-if datetime.now().hour>=15:
-    tg(f"📈 *Daily 3:30 P&L* Scanned:{len(S)} Found:{len(r)}")
+        tg("1000 Scan Done - 0 Match")
