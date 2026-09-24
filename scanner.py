@@ -1,4 +1,4 @@
- import yfinanceas yf, requests, os, pyotp
+import yfinanceas yf, requests, os, pyotp
 from concurrent.futures import ThreadPoolExecutor
 from SmartApi import SmartConnect
 from datetime import datetime
