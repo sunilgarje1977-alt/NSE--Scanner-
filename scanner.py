@@ -6,13 +6,12 @@ from SmartApi import SmartConnect
 from concurrent.futures import ThreadPoolExecutor
 
 # ===== CONFIG =====
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-API_KEY = os.getenv("ANGEL_API_KEY")
-CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
-PASSWORD = os.getenv("ANGEL_PASSWORD")
-TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
-
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN","").strip()
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID","").strip()
+API_KEY = os.getenv("ANGEL_API_KEY","").strip()
+CLIENT_ID = os.getenv("ANGEL_CLIENT_ID","").strip()
+PASSWORD = os.getenv("ANGEL_PASSWORD","").strip()
+TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET","").strip()
 CAPITAL_PER_TRADE = 5000
 MAX_TRADES = 6
 ACTIVE_LIMIT = 2
