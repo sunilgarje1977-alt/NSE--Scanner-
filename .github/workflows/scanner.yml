@@ -1,0 +1,22 @@
+name: ANGEL NSE 1000 PRO
+on:
+  schedule:
+    - cron: '*/2 3-10 * * 1-5'
+    - cron: '5 10 * * 1-5'
+  workflow_dispatch:
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - run: pip install smartapi-python pyotp pandas requests
+      - run: python scanner.py
+      - run: |
+          git config --global user.name "bot"
+          git config --global user.email "bot@bot.com"
+          git add trades.json || true
+          git commit -m "update" || true
+          git push || true
