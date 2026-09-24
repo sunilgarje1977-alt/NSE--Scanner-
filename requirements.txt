@@ -1,7 +1,4 @@
-requests
-pandas
 smartapi-python
 pyotp
-yfinance
-lxml
-html5lib
+pandas
+requests
