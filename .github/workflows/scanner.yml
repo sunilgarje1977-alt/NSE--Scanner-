@@ -1,4 +1,4 @@
-name: ANGEL NSE 1000 PRO
+ name: ANGEL NSE 1000 PRO
 on:
   schedule:
     - cron: '*/2 3-10 * * 1-5'
@@ -14,6 +14,11 @@ jobs:
           python-version: '3.10'
       - run: pip install smartapi-python pyotp pandas requests logzero pycryptodome websocket-client
       - run: python scanner.py
+        env:
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          TOTP_SECRET: ${{ secrets.TOTP_SECRET }}
+          API_KEY: ${{ secrets.API_KEY }}
       - run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
