@@ -15,10 +15,12 @@ jobs:
       - run: pip install smartapi-python pyotp pandas requests logzero pycryptodome websocket-client
       - run: python scanner.py
         env:
-          CLIENT_ID: ${{ secrets.CLIENT_ID }}
-          PASSWORD: ${{ secrets.PASSWORD }}
-          TOTP_SECRET: ${{ secrets.TOTP_SECRET }}
-          API_KEY: ${{ secrets.API_KEY }}
+          CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
+          PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
+          TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+          API_KEY: ${{ secrets.ANGEL_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       - run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
