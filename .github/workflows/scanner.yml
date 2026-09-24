@@ -14,25 +14,17 @@ jobs:
           python-version: '3.10'
       - run: pip install smartapi-python pyotp pandas requests logzero pycryptodome websocket-client
       - name: Run scanner
+        env:
+          ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          CLIENT_ID=$(echo "${{ secrets.ANGEL_CLIENT_ID }}${{ secrets.CLIENT_ID }}" | tr -d '\r\n' | xargs)
-          PASSWORD=$(echo "${{ secrets.ANGEL_PASSWORD }}${{ secrets.PASSWORD }}" | tr -d '\r\n' | xargs)
-          API_KEY=$(echo "${{ secrets.ANGEL_API_KEY }}${{ secrets.API_KEY }}" | tr -d '\r\n' | xargs)
-          TOTP_SECRET=$(echo "${{ secrets.ANGEL_TOTP_SECRET }}${{ secrets.ANGEL_TOTP }}${{ secrets.TOTP_SECRET }}" | tr -d '\r\n' | xargs)
-          BOT_TOKEN=$(echo "${{ secrets.TELEGRAM_BOT_TOKEN }}${{ secrets.TELEGRAM_B... }}" | tr -d '\r\n' | xargs)
-          CHAT_ID=$(echo "${{ secrets.TELEGRAM_CHAT_ID }}${{ secrets.TELEGRAM_C... }}" | tr -d '\r\n' | xargs)
-          export CLIENT_ID PASSWORD API_KEY TOTP_SECRET
-          export ANGEL_CLIENT_ID=$CLIENT_ID
-          export ANGEL_PASSWORD=$PASSWORD
-          export ANGEL_API_KEY=$API_KEY
-          export ANGEL_TOTP_SECRET=$TOTP_SECRET
-          export ANGEL_TOTP=$TOTP_SECRET
-          export TELEGRAM_BOT_TOKEN=$BOT_TOKEN
-          export TELEGRAM_CHAT_ID=$CHAT_ID
-          export BOT_TOKEN=$BOT_TOKEN
-          export CHAT_ID=$CHAT_ID
-          timeout 250 python scanner.py || echo "Scan finished/timeout - OK"
-      - run: |
+          python scanner.py
+      - name: Save trades
+        run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
           git add trades.json || true
