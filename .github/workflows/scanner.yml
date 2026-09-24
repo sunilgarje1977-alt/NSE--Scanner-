@@ -1,29 +1,15 @@
 name: ANGEL NSE 1000 PRO
-on:
-  schedule:
-    - cron: '*/2 3-10 * * 1-5'
-    - cron: '5 10 * * 1-5'
-  workflow_dispatch:
+on: workflow_dispatch
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-      - run: pip install smartapi-python pyotp pandas requests logzero pycryptodome websocket-client
-      - run: python scanner.py
-        env:
-          CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
-          PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
-          TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
-          API_KEY: ${{ secrets.ANGEL_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       - run: |
-          git config --global user.name "bot"
-          git config --global user.email "bot@bot.com"
-          git add trades.json || true
-          git commit -m "update" || true
-          git push || true
+          echo "CLIENT_ID exists: ${{ secrets.ANGEL_CLIENT_ID != '' }}"
+          echo "PASSWORD exists: ${{ secrets.ANGEL_PASSWORD != '' }}"
+          echo "TOTP exists: ${{ secrets.ANGEL_TOTP_SECRET != '' }}"
+          echo "API_KEY exists: ${{ secrets.ANGEL_API_KEY != '' }}"
+          echo "Checking other names:"
+          echo "ANGEL_TOTP: ${{ secrets.ANGEL_TOTP != '' }}"
+          echo "TOTP_SECRET: ${{ secrets.TOTP_SECRET != '' }}"
