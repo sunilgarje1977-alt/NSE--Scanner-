@@ -2,6 +2,6 @@ requests
 pandas
 smartapi-python
 pyotp
-logzero
-websocket-client
-TA-Lib
+yfinance
+lxml
+html5lib
