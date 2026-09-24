@@ -1,4 +1,4 @@
- name: ANGEL NSE 1000 PRO
+name: ANGEL NSE 1000 PRO
 on:
   schedule:
     - cron: '*/2 3-10 * * 1-5'
