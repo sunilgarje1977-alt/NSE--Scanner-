@@ -2,7 +2,6 @@ name: ANGEL NSE 1000 PRO
 on:
   schedule:
     - cron: '*/2 3-10 * * 1-5'
-    - cron: '5 10 * * 1-5'
   workflow_dispatch:
 jobs:
   scan:
@@ -15,13 +14,32 @@ jobs:
       - run: pip install smartapi-python pyotp pandas requests logzero pycryptodome websocket-client
       - name: Run scanner
         env:
-          ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
-          ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
-          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
-          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          S1: ${{ secrets.ANGEL_CLIENT_ID }}
+          S2: ${{ secrets.CLIENT_ID }}
+          S3: ${{ secrets.ANGEL_PASSWORD }}
+          S4: ${{ secrets.PASSWORD }}
+          S5: ${{ secrets.ANGEL_API_KEY }}
+          S6: ${{ secrets.API_KEY }}
+          S7: ${{ secrets.ANGEL_TOTP_SECRET }}
+          S8: ${{ secrets.ANGEL_TOTP }}
+          S9: ${{ secrets.TOTP_SECRET }}
+          S10: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          S11: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          export ANGEL_CLIENT_ID="${S1}${S2}"
+          export ANGEL_PASSWORD="${S3}${S4}"
+          export ANGEL_API_KEY="${S5}${S6}"
+          export ANGEL_TOTP_SECRET="${S7}${S8}${S9}"
+          export ANGEL_TOTP="${S7}${S8}${S9}"
+          export TELEGRAM_BOT_TOKEN="${S10}"
+          export TELEGRAM_CHAT_ID="${S11}"
+          export CLIENT_ID=$ANGEL_CLIENT_ID
+          export PASSWORD=$ANGEL_PASSWORD
+          export API_KEY=$ANGEL_API_KEY
+          export TOTP_SECRET=$ANGEL_TOTP_SECRET
+          echo "Checking secrets length..."
+          echo "CLIENT_ID len: ${#ANGEL_CLIENT_ID}"
+          echo "TOTP len: ${#ANGEL_TOTP_SECRET}"
           python scanner.py
       - name: Save trades
         run: |
