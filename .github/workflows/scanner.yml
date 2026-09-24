@@ -26,20 +26,21 @@ jobs:
           S10: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           S11: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          export ANGEL_CLIENT_ID="${S1}${S2}"
-          export ANGEL_PASSWORD="${S3}${S4}"
-          export ANGEL_API_KEY="${S5}${S6}"
-          export ANGEL_TOTP_SECRET="${S7}${S8}${S9}"
-          export ANGEL_TOTP="${S7}${S8}${S9}"
-          export TELEGRAM_BOT_TOKEN="${S10}"
-          export TELEGRAM_CHAT_ID="${S11}"
+          clean() { echo "$1" | tr -d '\r\n' | xargs; }
+          export ANGEL_CLIENT_ID=$(clean "${S1}${S2}")
+          export ANGEL_PASSWORD=$(clean "${S3}${S4}")
+          export ANGEL_API_KEY=$(clean "${S5}${S6}")
+          export ANGEL_TOTP_SECRET=$(clean "${S7}${S8}${S9}")
+          export ANGEL_TOTP=$ANGEL_TOTP_SECRET
+          export TELEGRAM_BOT_TOKEN=$(clean "${S10}")
+          export TELEGRAM_CHAT_ID=$(clean "${S11}")
           export CLIENT_ID=$ANGEL_CLIENT_ID
           export PASSWORD=$ANGEL_PASSWORD
           export API_KEY=$ANGEL_API_KEY
           export TOTP_SECRET=$ANGEL_TOTP_SECRET
-          echo "Checking secrets length..."
-          echo "CLIENT_ID len: ${#ANGEL_CLIENT_ID}"
-          echo "TOTP len: ${#ANGEL_TOTP_SECRET}"
+          export BOT_TOKEN=$TELEGRAM_BOT_TOKEN
+          export CHAT_ID=$TELEGRAM_CHAT_ID
+          echo "TOTP len after clean: ${#ANGEL_TOTP_SECRET}"
           python scanner.py
       - name: Save trades
         run: |
