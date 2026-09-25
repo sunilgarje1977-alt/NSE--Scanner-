@@ -13,70 +13,85 @@ def tg(m):
 
 def chk(s):
     try:
-        df=yf.download(s, period="3d", interval="15m", progress=False, auto_adjust=True)
-        dfd=yf.download(s, period="20d", interval="1d", progress=False, auto_adjust=True)
-        if len(df)<20 or len(dfd)<10:
+        df=yf.download(s, period="5d", interval="15m", progress=False, auto_adjust=True)
+        if len(df)<30:
             return None
         
-        price=float(df['Close'].iloc[-1])
+        last=df.iloc[-1]
+        prev3=df.iloc[-4:-1]
+        price=float(last['Close'])
+        
         if not 30 <= price <= 5000:
             return None
 
-        # 3 Candle Breakout 0.3%
-        high3=float(df['High'].iloc[-4:-1].max())
-        bo=((price-high3)/high3)*100
-        if bo < 0.3:
+        # === CONDITION 1: मागील 3 Candle High Breakout ===
+        three_high=float(prev3['High'].max())
+        if price <= three_high:
+            return None
+        bo3=((price-three_high)/three_high)*100
+        if bo3 < 0.3:
             return None
 
-        # Smallest Candle SL
-        prev3=df.iloc[-4:-1]
+        # === CONDITION 2: Day High Breakout === NEW
+        # आजचा दिवस - आजचा High (Current Candle सोडून)
+        today = df.iloc[-1].name.date()
+        today_df = df[df.index.date == today]
+        if len(today_df) > 1:
+            day_high = float(today_df.iloc[:-1]['High'].max())
+        else:
+            # आजचा पहिलाच Candle असेल तर कालचा Day High
+            day_high = float(df.iloc[-27:-1]['High'].max()) if len(df)>27 else three_high
+        
+        if price <= day_high:
+            return None
+        bo_day=((price-day_high)/day_high)*100
+        if bo_day < 0.2: # Day High 0.2% तरी तोडला पाहिजे
+            return None
+
+        # === CONDITION 3: Smallest Candle SL ===
         sl=float(prev3.loc[(prev3['Close']-prev3['Open']).abs().idxmin()]['Low'])
         if price <= sl:
             return None
-
-        # Bullish Candle - Fake Breakout नको
-        if float(df['Close'].iloc[-1]) <= float(df['Open'].iloc[-1]):
+        if ((price-sl)/price)*100 > 2.5: # Risk जास्त नको
             return None
 
-        # EMA 9 > 15
+        # === CONDITION 4: Bullish + EMA + RSI ===
+        if float(last['Close']) <= float(last['Open']):
+            return None
         ema9=float(df['Close'].ewm(9).mean().iloc[-1])
         ema15=float(df['Close'].ewm(15).mean().iloc[-1])
         if ema9 <= ema15:
             return None
         
-        # RSI 50+
         delta=df['Close'].diff()
         gain=delta.where(delta>0,0).rolling(14).mean()
         loss=-delta.where(delta<0,0).rolling(14).mean()
-        rs=gain/loss
-        rsi=100-(100/(1+rs))
+        rsi=100-(100/(1+gain/loss))
         rsi_last=float(rsi.iloc[-1])
-        if rsi_last < 50:
+        if rsi_last < 52:
             return None
 
         tgt=price+(price-sl)*2
         tgt5=price+(price-sl)*5
-        return {"sym":s.replace(".NS",""),"entry":price,"sl":sl,"tgt":tgt,"tgt5":tgt5,"bo":bo,"rsi":rsi_last}
+        return {"sym":s.replace(".NS",""),"entry":price,"sl":sl,"tgt":tgt,"tgt5":tgt5,"bo3":bo3,"bo_day":bo_day,"day_high":day_high,"three_high":three_high,"rsi":rsi_last}
     except:
         return None
 
-# 100 Best NSE Stock - Trading साठी
-S=["RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS","SBIN.NS","BHARTIARTL.NS","ITC.NS","LT.NS","MARUTI.NS","TITAN.NS","TATAMOTORS.NS","ADANIENT.NS","POWERGRID.NS","ONGC.NS","NTPC.NS","BAJFINANCE.NS","JSWSTEEL.NS","TATASTEEL.NS","ADANIPORTS.NS","HINDALCO.NS","BPCL.NS","EICHERMOT.NS","CIPLA.NS","DIVISLAB.NS","BRITANNIA.NS","HEROMOTOCO.NS","APOLLOHOSP.NS","TECHM.NS","INDUSINDBK.NS","M&M.NS","SBILIFE.NS","HDFCLIFE.NS","DLF.NS","GODREJPROP.NS","INDIGO.NS","GSFC.NS","GNFC.NS","BLSE.NS","REPL.NS","XTRANET.NS","RRKABEL.NS","SUZLON.NS","IRCTC.NS","HAL.NS","BEL.NS","RVNL.NS","IRFC.NS","PRAKASH.NS","KLBRENG-B.NS","HIMATSEIDE.NS","TARAPUR.NS"]*2
+S=["RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS","SBIN.NS","BHARTIARTL.NS","ITC.NS","LT.NS","MARUTI.NS","TITAN.NS","TATAMOTORS.NS","ADANIENT.NS","POWERGRID.NS","ONGC.NS","NTPC.NS","BAJFINANCE.NS","JSWSTEEL.NS","TATASTEEL.NS","ADANIPORTS.NS","HINDALCO.NS","BPCL.NS","EICHERMOT.NS","CIPLA.NS","DIVISLAB.NS","BRITANNIA.NS","HEROMOTOCO.NS","APOLLOHOSP.NS","TECHM.NS","INDUSINDBK.NS","M&M.NS","SBILIFE.NS","HDFCLIFE.NS","DLF.NS","GODREJPROP.NS","INDIGO.NS","GSFC.NS","GNFC.NS","BLSE.NS","REPL.NS","XTRANET.NS","RRKABEL.NS","SUZLON.NS","IRCTC.NS","HAL.NS","BEL.NS"]*2
 
 ist=pytz.timezone('Asia/Kolkata')
 now=datetime.now(ist).strftime("%H:%M:%S")
 
-print(f"Scanning {len(S)} Stocks...")
 with ThreadPoolExecutor(max_workers=8) as ex:
     res=[r for r in ex.map(chk, S) if r]
-    res=sorted(res,key=lambda x:x['bo'],reverse=True)[:6]
+    res=sorted(res,key=lambda x:x['bo3']+x['bo_day'],reverse=True)[:2]
 
 if res:
-    msg=f"🚀 *TRADING SCAN {now}*\nActive:{len(res)}/2 Done:0/6\n\n"
+    msg=f"🚀 *3 CANDLE + DAY HIGH BREAKOUT {now}*\n\n"
     for t in res:
-        msg+=f"🟢 *{t['sym']}* ₹{t['entry']:.1f} | BO:{t['bo']:.2f}% RSI:{t['rsi']:.0f}\nSL:{t['sl']:.1f} T:{t['tgt']:.1f} T5:{t['tgt5']:.1f}\n\n"
+        msg+=f"🟢 *{t['sym']}* ₹{t['entry']:.1f}\n3C High:{t['three_high']:.1f} BO:{t['bo3']:.2f}%\nDay High:{t['day_high']:.1f} BO:{t['bo_day']:.2f}%\nSL:{t['sl']:.1f} T:{t['tgt']:.1f} T5:{t['tgt5']:.1f} RSI:{t['rsi']:.0f}\n\n"
 else:
-    msg=f"📊 Scan {now} Active:0/2 Done:0/6 No Trade >0.4% (15m)"
+    msg=f"📊 Scan {now} Active:0/2 Done:0/6 No Trade - 3Candle+DayHigh+0.3% Filter"
 
 tg(msg)
 print(msg)
