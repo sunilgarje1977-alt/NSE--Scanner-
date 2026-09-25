@@ -1,80 +1,102 @@
-import os, pyotp, requests
+import yfinance as yf, requests, os, pyotp, json
+from concurrent.futures import ThreadPoolExecutor
 from SmartApi import SmartConnect
-from datetime import datetime, timedelta
-
-REWARD_RATIO = 2.5
-N_STOCKS = 1000 # किती स्कॅन करायचे - 1000
-
-def send_telegram(msg):
-    try:
-        t=os.getenv("TELEGRAM_BOT_TOKEN"); c=os.getenv("TELEGRAM_CHAT_ID")
-        requests.post(f"https://api.telegram.org/bot{t}/sendMessage", data={"chat_id":c,"text":msg,"parse_mode":"Markdown"}, timeout=15)
-    except Exception as e:
-        print(e)
-
+from datetime import datetime
+import pytz
+B=os.getenv("TELEGRAM_BOT_TOKEN"); C=os.getenv("TELEGRAM_CHAT_ID")
+API_KEY=os.getenv("ANGEL_API_KEY"); CLIENT_ID=os.getenv("ANGEL_CLIENT_ID")
+PWD=os.getenv("ANGEL_PASSWORD"); TOTP_SECRET=os.getenv("ANGEL_TOTP_SECRET","").replace(" ","").strip()
+IST=pytz.timezone('Asia/Kolkata'); STATE_FILE="trades_today.json"
+def tg(m):
+ try: requests.post(f"https://api.telegram.org/bot{B}/sendMessage",data={"chat_id":C,"text":m,"parse_mode":"Markdown"},timeout=15)
+ except: pass
+def angel_login():
+ try:
+  api=SmartConnect(api_key=API_KEY); api.generateSession(CLIENT_ID,PWD,pyotp.TOTP(TOTP_SECRET).now())
+  master=requests.get("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json",timeout=20).json()
+  mp={d['symbol'].replace('-EQ',''):d['token'] for d in master if d['exch_seg']=='NSE' and d['symbol'].endswith('-EQ')}
+  return api,mp
+ except: return None,{}
+def load_state():
+ try:
+  if not os.path.exists(STATE_FILE): return {"date":datetime.now(IST).strftime('%Y-%m-%d'),"trades":[],"active":[]}
+  import json as js
+  with open(STATE_FILE,'r') as f: s=js.load(f)
+  if s.get("date")!=datetime.now(IST).strftime('%Y-%m-%d'): return {"date":datetime.now(IST).strftime('%Y-%m-%d'),"trades":[],"active":[]}
+  return s
+ except: return {"date":datetime.now(IST).strftime('%Y-%m-%d'),"trades":[],"active":[]}
+def save_state(s):
+ import json as js
+ with open(STATE_FILE,'w') as f: js.dump(s,f)
 try:
-    print("LLOYDSENGG Pattern Scan Starting...")
-    obj = SmartConnect(api_key=os.getenv("ANGEL_API_KEY"))
-    obj.generateSession(os.getenv("ANGEL_CLIENT_ID"), os.getenv("ANGEL_PASSWORD"), pyotp.TOTP(os.getenv("ANGEL_TOTP_SECRET","").replace(" ","").strip()).now())
-
-    # NSE 1000 Tokens Load
-    master = requests.get("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json", timeout=20).json()
-    eq = [d for d in master if d['exch_seg']=='NSE' and d['symbol'].endswith('-EQ')][:N_STOCKS]
-    print(f"Loaded {len(eq)} stocks")
-
-    to_date=datetime.now()
-    from_date=to_date-timedelta(days=3)
-    matches=[]
-
-    for d in eq:
-        try:
-            p={"exchange":"NSE","symboltoken":d['token'],"interval":"FIVE_MINUTE","fromdate":from_date.strftime("%Y-%m-%d %H:%M"),"todate":to_date.strftime("%Y-%m-%d %H:%M")}
-            candles=obj.getCandleData(p).get('data',[])
-            if len(candles)<40: continue
-
-            # आजचे candles (शेवटचे 75 = 1 दिवस)
-            today = candles[-75:]
-            if len(today)<20: continue
-
-            # LLOYDSENGG Logic
-            open_range = today[:15] # 9:15-10:15
-            or_high = max(c[2] for c in open_range)
-            or_low = min(c[3] for c in open_range)
-
-            curr = today[-1]
-            prev = today[-2]
-
-            # EMA 9,21,50 Simple Check (Close > MA)
-            closes = [c[4] for c in today]
-            ema9 = sum(closes[-9:])/9
-            ema21 = sum(closes[-21:])/21
-
-            vol_avg = sum(c[5] for c in today[-20:-1])/19
-
-            cond1 = curr[4] > or_high # Opening Range Breakout
-            cond2 = curr[4] > ema9 > ema21 # EMA वर
-            cond3 = curr[5] > vol_avg*1.6 # Volume 1.6x
-            cond4 = curr[4] > prev[4] # Green candle
-
-            if cond1 and cond2 and cond3 and cond4:
-                risk = curr[2]-curr[3]
-                if risk==0: continue
-                target = curr[4] + risk*REWARD_RATIO
-                gain = round(((curr[4]-or_high)/or_high)*100,2)
-                matches.append(f"*{d['symbol'].replace('-EQ','')}* ₹{curr[4]} | ORB:{or_high} | +{gain}% | SL:{round(curr[3],1)} T:{round(target,1)}")
-        except:
-            continue
-
-    now=datetime.now().strftime('%d-%m %H:%M')
-    if not matches:
-        msg=f"📊 *NSE {N_STOCKS} LLOYDSENGG Pattern (1:{REWARD_RATIO})*\n⏰ {now}\n❌ 0 Match Found\n{len(eq)} Stocks स्कॅन - आज ORB Breakout नाही"
-    else:
-        msg=f"🚀 *LLOYDSENGG Type - {len(matches)} Found (1:{REWARD_RATIO})*\n⏰ {now}\n\n" + "\n\n".join(matches[:12])
-
-    print(msg)
-    send_telegram(msg)
-
-except Exception as e:
-    import traceback
-    print(traceback.format_exc())
-    send_telegram(f"Error: {e}")
+ master=requests.get("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json",timeout=20).json()
+ real_eq=[d['symbol'].replace('-EQ','') for d in master if d['exch_seg']=='NSE' and d['symbol'].endswith('-EQ')][:1000]
+ S=[s+".NS" for s in real_eq]
+except: S=["RELIANCE.NS","TCS.NS","INFY.NS"]*333
+def chk(s):
+ try:
+  d=yf.download(s,period="40d",interval="1d",progress=False,auto_adjust=False,threads=False)
+  f=yf.download(s,period="5d",interval="15m",progress=False,auto_adjust=False,threads=False)
+  if hasattr(d.columns,'levels'): d.columns=d.columns.droplevel(1)
+  if hasattr(f.columns,'levels'): f.columns=f.columns.droplevel(1)
+  if len(d)<30 or len(f)<30: return None
+  e=float(d['Close'].iloc[-1]); vol_today=float(d['Volume'].iloc[-1])
+  if (e*vol_today)/10000000<10: return None
+  if not 80<=e<=3000: return None
+  d['EMA9']=d['Close'].ewm(span=9,adjust=False).mean(); d['EMA15']=d['Close'].ewm(span=15,adjust=False).mean()
+  if float(d['EMA9'].iloc[-1])<float(d['EMA15'].iloc[-1]): return None
+  vol_avg=float(d['Volume'].tail(20).mean())
+  if vol_today/vol_avg<1.5: return None
+  f['Typical']=(f['High']+f['Low']+f['Close'])/3; f['VP']=f['Typical']*f['Volume']
+  if float(f.iloc[-1]['Close']) < f['VP'].tail(26).sum()/f['Volume'].tail(26).sum(): return None
+  delta=d['Close'].diff(); gain=delta.where(delta>0,0).rolling(14).mean(); loss=-delta.where(delta<0,0).rolling(14).mean()
+  rsi=100-(100/(1+gain/loss)); rsi_val=float(rsi.iloc[-1])
+  if rsi_val<55 or rsi_val>82: return None
+  t=f.tail(26); fh=float(t.iloc[0:4]['High'].max())
+  if (float(f.iloc[-1]['Close'])-fh)/fh*100<0.8: return None
+  rng=float(f.iloc[-1]['High'])-float(f.iloc[-1]['Low']); body=abs(float(f.iloc[-1]['Close'])-float(f.iloc[-1]['Open']))
+  if rng==0 or body/rng<0.60 or float(f.iloc[-1]['Close'])<float(f.iloc[-1]['Open']): return None
+  br=t[t['High']>fh]
+  if br.empty: return None
+  before=t.iloc[:t.index.get_loc(br.index[0])][-5:]; small=before.loc[abs(before['Close']-before['Open']).idxmin()]
+  sl=float(small['Low'])
+  if ((e-sl)/e)*100<=0 or ((e-sl)/e)*100>4: return None
+  tgt=e+(e-sl)*2.5
+  return {"sym":s.replace(".NS",""),"entry":round(e,1),"sl":round(sl,1),"tgt":round(tgt,1),"br":round((float(f.iloc[-1]['Close'])-fh)/fh*100,2),"vol":round(vol_today/vol_avg,1),"rsi":round(rsi_val,1)}
+ except: return None
+state=load_state(); now_ist=datetime.now(IST)
+for act in state["active"][:]:
+ try:
+  live=yf.download(act['sym']+".NS",period="1d",interval="1m",progress=False,auto_adjust=False)
+  if hasattr(live.columns,'levels'): live.columns=live.columns.droplevel(1)
+  if len(live)==0: continue
+  ltp=float(live['Close'].iloc[-1])
+  status=None
+  if ltp<=act['sl']: status="SL HIT"
+  elif ltp>=act['tgt']: status="TARGET HIT"
+  if status:
+   pnl=(ltp-act['entry'])*act['qty']; act['exit']=ltp; act['pnl']=round(pnl,1); act['status']=status
+   state["trades"].append(act); state["active"].remove(act); tg(f"Closed {act['sym']} {status} P&L:{act['pnl']}")
+ except: pass
+can_take=2-len(state["active"]); daily_left=6-len(state["trades"])-len(state["active"])
+if can_take>0 and daily_left>0 and now_ist.hour<15:
+ with ThreadPoolExecutor(max_workers=20) as x: r=[i for i in x.map(chk,S) if i]
+ r=sorted(r,key=lambda k:k['br'],reverse=True)
+ r=[t for t in r if t['sym'] not in [a['sym'] for a in state["active"]] and t['sym'] not in [tt['sym'] for tt in state["trades"]]][:can_take]
+ if r:
+  api,token_map=angel_login()
+  for trade in r[:daily_left]:
+   if len(state["active"])>=2: break
+   trade['qty']=max(1,int(5000/trade['entry'])); trade['time']=now_ist.strftime('%H:%M'); trade['date']=state['date']
+   if api:
+    try:
+     token=token_map.get(trade['sym'],"")
+     api.placeOrder({"variety":"NORMAL","tradingsymbol":trade['sym'],"symboltoken":token,"transactiontype":"BUY","exchange":"NSE","ordertype":"MARKET","producttype":"INTRADAY","duration":"DAY","quantity":trade['qty']})
+     tg(f"Angel RUN #{len(state['trades'])+len(state['active'])+1} {trade['sym']} E:{trade['entry']} SL:{trade['sl']}")
+    except: tg(f"Paper Active {trade['sym']} E:{trade['entry']}")
+   else: tg(f"Paper Active {trade['sym']} E:{trade['entry']}")
+   state["active"].append(trade); save_state(state)
+save_state(state)
+if now_ist.hour>=15 and now_ist.minute>=20:
+ total=sum([t.get('pnl',0) for t in state["trades"]]); tg(f"END DAY {state['date']} Total:{len(state['trades'])}/6 P&L:{total} Active:{len(state['active'])}/2")
+else: tg(f"Scan {now_ist.strftime('%H:%M')} Active:{len(state['active'])}/2 Done:{len(state['trades'])}/6")
