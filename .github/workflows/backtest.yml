@@ -13,7 +13,7 @@ jobs:
       - name: Install deps
         run: pip install smartapi-python logzero websocket-client pyotp pandas requests --quiet
       - name: Run Backtest
-        run: python backtest.py
+        run: python Backtest_1000.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
