@@ -1,26 +1,85 @@
-name: NSE Backtest
+import os, datetime, requests, pandas as pd
+from SmartApi import SmartConnect
+import pyotp, time
 
-on:
-  workflow_dispatch:
+VOL_X = 3.0
+RSI_BUY_MIN, RSI_BUY_MAX = 40, 70
+RSI_SELL_MIN, RSI_SELL_MAX = 30, 60
+TARGET_R = 1.0
 
-jobs:
-  backtest:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-      - name: Install deps
-        run: |
-          pip install smartapi-python pandas requests pyotp
-      - name: Run Backtest
-        env:
-          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
-          ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
-          ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
-          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python backtest.py
+def send_tg(msg):
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat = os.getenv("TELEGRAM_CHAT_ID")
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try: requests.post(url, data={"chat_id": chat, "text": msg, "parse_mode": "HTML"}, timeout=15)
+    except: pass
+
+obj = SmartConnect(api_key=os.getenv("ANGEL_API_KEY"))
+totp = pyotp.TOTP(os.getenv("ANGEL_TOTP_SECRET")).now()
+obj.generateSession(os.getenv("ANGEL_CLIENT_ID"), os.getenv("ANGEL_PASSWORD"), totp)
+
+def get_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+def get_candles(token, days=30):
+    try:
+        p = {"exchange": "NSE","symboltoken": token,"interval": "ONE_MINUTE","fromdate": (datetime.datetime.now() - datetime.timedelta(days=days+5)).strftime("%Y-%m-%d %H:%M"),"todate": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+        data = obj.getCandleData(p)
+        df = pd.DataFrame(data['data'], columns=['time','open','high','low','close','volume'])
+        df['time'] = pd.to_datetime(df['time'])
+        return df
+    except: return None
+
+url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
+df_inst = pd.read_json(url)
+nse = df_inst[(df_inst['exch_seg']=='NSE') & (df_inst['symbol'].str.endswith('-EQ'))].head(200)
+tokens = nse[['symbol','token']].values.tolist()
+
+send_tg(f"BACKTEST V4 START - 30 Days Intraday - 3xVol + RSI Filter + 1:1 Target")
+total_trades=0; wins=0; loss=0
+
+for symbol, token in tokens:
+    df = get_candles(token, 30)
+    if df is None or len(df) < 100: continue
+    df['ema9'] = df['close'].ewm(span=9).mean()
+    df['ema15'] = df['close'].ewm(span=15).mean()
+    df['rsi'] = get_rsi(df['close'])
+    df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum()
+    df['vol_avg'] = df['volume'].rolling(20).mean()
+    for i in range(50, len(df)-20):
+        last = df.iloc[i]; prev = df.iloc[i-1]
+        if pd.isna(last['vol_avg']) or last['vol_avg']==0: continue
+        vol_ratio = last['volume'] / last['vol_avg']
+        rsi = last['rsi']
+        if pd.isna(rsi): continue
+        buy_cond = (last['close'] > last['open'] and vol_ratio >= VOL_X and RSI_BUY_MIN < rsi < RSI_BUY_MAX and last['close'] > last['vwap'] and last['ema9'] > last['ema15'])
+        sell_cond = (last['close'] < last['open'] and vol_ratio >= VOL_X and RSI_SELL_MIN < rsi < RSI_SELL_MAX and last['close'] < last['vwap'] and last['ema9'] < last['ema15'])
+        entry=None; sl=None; direction=None
+        if buy_cond: entry=last['close']; sl=prev['low']; direction="BUY"
+        elif sell_cond: entry=last['close']; sl=prev['high']; direction="SELL"
+        else: continue
+        diff = abs(entry - sl)
+        if diff==0: continue
+        if direction=="BUY":
+            target = entry + diff * TARGET_R
+            future = df.iloc[i+1:i+20]
+            hit_target = (future['high'] >= target).any()
+            hit_sl = (future['low'] <= sl).any()
+        else:
+            target = entry - diff * TARGET_R
+            future = df.iloc[i+1:i+20]
+            hit_target = (future['low'] <= target).any()
+            hit_sl = (future['high'] >= sl).any()
+        total_trades+=1
+        if hit_target and not hit_sl: wins+=1
+        elif hit_sl: loss+=1
+    time.sleep(0.2)
+
+win_rate = (wins / total_trades * 100) if total_trades>0 else 0
+msg = f"\n📊 <b>BACKTEST V4 RESULT - 30 DAYS</b>\nConfig: 3xVol + RSI 40-70 + 1:1\n\nTotal Trades: {total_trades}\nWins: {wins}\nLoss: {loss}\n<b>WinRate: {win_rate:.1f}%</b>\n"
+send_tg(msg)
+print(msg)
