@@ -1,20 +1,27 @@
-name: NSE Backtest
-on:
-  workflow_dispatch:
-jobs:
-  backtest:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-      - run: pip install -r requirements.txt
-      - run: python backtest.py
-        env:
-          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
-          ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
-          ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
-          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+import os, datetime, requests, pandas as pd
+from SmartApi import SmartConnect
+import pyotp
+import time
+
+# --- CONFIG V4 BACKTEST ---
+VOL_X = 3.0
+RSI_BUY_MIN, RSI_BUY_MAX = 40, 70
+RSI_SELL_MIN, RSI_SELL_MAX = 30, 60
+TARGET_R = 1.0 # 1:1
+
+def send_tg(msg):
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat = os.getenv("TELEGRAM_CHAT_ID")
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try: requests.post(url, data={"chat_id": chat, "text": msg, "parse_mode": "HTML"}, timeout=15)
+    except: pass
+
+# Login
+obj = SmartConnect(api_key=os.getenv("ANGEL_API_KEY"))
+totp = pyotp.TOTP(os.getenv("ANGEL_TOTP_SECRET")).now()
+obj.generateSession(os.getenv("ANGEL_CLIENT_ID"), os.getenv("ANGEL_PASSWORD"), totp)
+print("LOGIN OK")
+
+def get_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 
