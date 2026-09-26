@@ -13,7 +13,7 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       - name: Install Deps
-        run: pip install smartapi-python logzero pyotp pandas requests --quiet
+        run: pip install smartapi-python logzero websocket-client pyotp pandas requests --quiet
       - name: Run Scanner
         run: python scanner.py
         env:
