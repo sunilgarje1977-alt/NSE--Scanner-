@@ -2,8 +2,7 @@ import os, requests, pandas as pd
 from SmartApi import SmartConnect
 import pyotp
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
-import pytz
+from datetime import datetime, timezone, timedelta
 
 def clean(s): return os.getenv(s,"").strip()
 def send_tg(m):
@@ -11,7 +10,6 @@ def send_tg(m):
         requests.post(f"https://api.telegram.org/bot{clean('TELEGRAM_BOT_TOKEN')}/sendMessage", json={"chat_id": clean('TELEGRAM_CHAT_ID'), "text": m, "parse_mode":"Markdown"}, timeout=15)
     except: pass
 
-# Angel Login
 obj=SmartConnect(api_key=clean("ANGEL_API_KEY"))
 obj.generateSession(clean("ANGEL_CLIENT_ID"), clean("ANGEL_PASSWORD"), pyotp.TOTP(clean("ANGEL_TOTP_SECRET")).now())
 
@@ -44,26 +42,25 @@ def scan_one(item):
         shoot = (c['h']>max(c['o'],c['c']) and (c['h']-max(c['o'],c['c'])) > body*1.5)
         ema_up = df['ema9'].iloc[-2] < df['ema15'].iloc[-2] and df['ema9'].iloc[-1] > df['ema15'].iloc[-1]
         ema_down = df['ema9'].iloc[-2] > df['ema15'].iloc[-2] and df['ema9'].iloc[-1] < df['ema15'].iloc[-1]
-        
-        # FULL FILTER - एकही काढला नाही
         if ema_up and c['rsi']>=60 and c['c']>c['vwap'] and vol_ok and (maru or engulf_buy or hammer) and c['c']>c['o']:
             sl=c['l']; risk=c['c']-sl
             if risk>0:
                 tgt=c['c']+risk*2.5
                 star="⭐" if any(x in sym for x in TOP_10) else ""
                 pat="Maru" if maru else "Engulf" if engulf_buy else "Hammer"
-                return f"🟢 BUY {star} {sym} @ {c['c']:.2f} SL:{sl:.2f} TGT:{tgt:.2f} 1:2.5 {pat}+VWAP+Vol1.5x RSI:{c['rsi']:.0f}"
+                return f"🟢 BUY {star} {sym} @ {c['c']:.2f} SL:{sl:.2f} TGT:{tgt:.2f} 1:2.5 {pat}+VWAP+Vol1.5x"
         if ema_down and c['rsi']<=40 and c['c']<c['vwap'] and vol_ok and (maru or engulf_sell or shoot) and c['c']<c['o']:
             sl=c['h']; risk=sl-c['c']
             if risk>0:
                 tgt=c['c']-risk*2.5
                 star="⭐" if any(x in sym for x in TOP_10) else ""
                 pat="Maru" if maru else "Engulf" if engulf_sell else "Shoot"
-                return f"🔴 SELL {star} {sym} @ {c['c']:.2f} SL:{sl:.2f} TGT:{tgt:.2f} 1:2.5 {pat}+VWAP+Vol1.5x RSI:{c['rsi']:.0f}"
+                return f"🔴 SELL {star} {sym} @ {c['c']:.2f} SL:{sl:.2f} TGT:{tgt:.2f} 1:2.5 {pat}+VWAP+Vol1.5x"
         return None
     except: return None
 
-ist=pytz.timezone('Asia/Kolkata'); now_ist=datetime.now(ist)
+IST = timezone(timedelta(hours=5, minutes=30))
+now_ist=datetime.now(IST)
 final=[]
 with ThreadPoolExecutor(max_workers=100) as ex:
     futures={ex.submit(scan_one, t): t for t in tokens}
@@ -77,6 +74,5 @@ if final:
     msg=f"🚀 *NSE 1000 FAST FULL FILTER | {now_ist.strftime('%H:%M')}*\n\n" + "\n\n".join(final)
     send_tg(msg); print(msg)
 else:
-    # 9:30-11:30 च्या बाहेर असेल तरी Scan 1000 झाला हे दाखव
-    send_tg(f"😴 No Strict Setup @ {now_ist.strftime('%H:%M')} | 1000 Scanned | FULL FILTER (EMA9x15+RSI60/40+VWAP+Vol1.5x+Maru/Engulf/Hammer) OK")
+    send_tg(f"😴 No Strict Setup @ {now_ist.strftime('%H:%M')} | 1000 Scanned | FULL FILTER OK")
     print("No setup")
