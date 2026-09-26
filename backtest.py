@@ -1,10 +1,8 @@
-name: NSE Backtest
-
+ name: NSE Backtest
 on:
   workflow_dispatch:
-
 jobs:
-  backtest:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -13,8 +11,7 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install deps
-        run: |
-          pip install smartapi-python pandas requests pyotp
+        run: pip install smartapi-python pandas requests pyotp
       - name: Run Backtest
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
