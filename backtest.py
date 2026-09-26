@@ -1,4 +1,4 @@
- import os, pandas as pd, requests, pyotp
+import os, pandas as pd, requests, pyotp
 from SmartApi import SmartConnect
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
