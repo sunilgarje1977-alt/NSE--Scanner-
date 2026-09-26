@@ -1,25 +1,23 @@
-name: NSE Scanner
+name: NSE Combo Scanner
 on:
   schedule:
-    - cron: '*/2 3-9 * * 1-5'
+    - cron: '8 3 * * 1-5' # 9:08 AM IST - Gap
+    - cron: '20 3 * * 1-5' # 9:20 AM IST - Vol + Gap
+    - cron: '0 5 * * 1-5' # 10:30 AM IST - Full Combo
   workflow_dispatch:
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-      - name: Install Deps
-        run: pip install smartapi-python logzero websocket-client pyotp pandas requests --quiet
-      - name: Run Scanner
-        run: python scanner.py
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with: {python-version: '3.9'}
+      - run: pip install -r requirements.txt
+      - run: python scanner.py
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
