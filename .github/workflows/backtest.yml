@@ -1,10 +1,8 @@
-name: NSE Scanner
+name: NSE Backtest
 on:
-  schedule:
-    - cron: '*/2 3-9 * * 1-5'
   workflow_dispatch:
 jobs:
-  scan:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -12,14 +10,14 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
-      - name: Install Deps
+      - name: Install deps
         run: pip install smartapi-python logzero websocket-client pyotp pandas requests --quiet
-      - name: Run Scanner
-        run: python scanner.py
+      - name: Run Backtest
+        run: python backtest.py
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
