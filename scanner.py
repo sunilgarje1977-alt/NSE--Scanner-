@@ -1,4 +1,4 @@
- """
+"""
 V6 FINAL - 1000Cr+ MarketCap | Top 10 Gainer (BUY+SELL) | Top 10 Loser (BUY+SELL)
 Conditions: Notebook 4-Candle Breakout + High Volume + EMA9/15 + VWAP + Supertrend + RSI + MACD
 Author: For Boss
