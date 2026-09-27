@@ -1,8 +1,7 @@
-smartapi-python==1.3.9
+smartapi-python
 pandas
-requests
 pyotp
+requests
 logzero
 websocket-client
 pycryptodome
-python-dotenv
