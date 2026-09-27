@@ -1,22 +1,18 @@
-name: NSE 5000 Final V3
+name: scan
 on:
-  schedule:
-    - cron: '8 3 * * 1-5'
-    - cron: '15 3 * * 1-5'
-    - cron: '30 5 * * 1-5'
-    - cron: '5 10 * * 1-5'
   workflow_dispatch:
+  schedule:
+    - cron: '15 3 * * 1-5'
 jobs:
-  scan:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
-        with: {python-version: '3.9'}
-      - run: pip install pandas SmartApi-python pyotp requests logzero websocket-client
-      - run: |
-          H=$(date +%H)
-          if [ $H -eq 10 ]; then python summary.py; else python scanner.py; fi
+        with:
+          python-version: '3.9'
+      - run: pip install pandas SmartApi-python pyotp requests
+      - run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
@@ -24,9 +20,3 @@ jobs:
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      - run: |
-          git config user.name "bot"
-          git config user.email "bot@bot.com"
-          git add trades_state.json || true
-          git commit -m "update" || true
-          git push || true
