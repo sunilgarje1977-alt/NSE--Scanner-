@@ -1,9 +1,10 @@
-name: NSE Combo Scanner
+name: NSE 5000 Final V3
 on:
   schedule:
-    - cron: '8 3 * * 1-5' # 9:08 AM IST - Gap
-    - cron: '20 3 * * 1-5' # 9:20 AM IST - Vol + Gap
-    - cron: '0 5 * * 1-5' # 10:30 AM IST - Full Combo
+    - cron: '8 3 * * 1-5'
+    - cron: '15 3 * * 1-5'
+    - cron: '30 5 * * 1-5'
+    - cron: '5 10 * * 1-5'
   workflow_dispatch:
 jobs:
   scan:
@@ -12,8 +13,10 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with: {python-version: '3.9'}
-      - run: pip install -r requirements.txt
-      - run: python scanner.py
+      - run: pip install pandas SmartApi-python pyotp requests
+      - run: |
+          H=$(date +%H)
+          if [ $H -eq 10 ]; then python summary.py; else python scanner.py; fi
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
@@ -21,3 +24,9 @@ jobs:
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - run: |
+          git config user.name "bot"
+          git config user.email "bot@bot.com"
+          git add trades_state.json || true
+          git commit -m "update" || true
+          git push || true
