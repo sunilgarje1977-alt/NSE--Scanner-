@@ -1,12 +1,8 @@
-name: FINAL v6.1 Small Cap Fix
+name: v8 SMALL+MID 9:15-3:00
 on:
   schedule:
-    # LAYER-2 FULL 1000 - 9:15 ते 10:30 IST (3:45-5:00 UTC)
-    - cron: '45,48,51,54,57 3 * * 1-5'
-    - cron: '0,3,6,9,12,15,18,21,24,27,30 4 * * 1-5'
-    # LAYER-1 FAST - 10:30 नंतर (5:00 UTC नंतर)
-    - cron: '35,40,45,50,55 4 * * 1-5'
-    - cron: '0,10,20,30,40,50 5-9 * * 1-5'
+    - cron: '45,50,55 3 * * 1-5'
+    - cron: '0,5,10,15,20,25,30,35,40,45,50,55 4-9 * * 1-5'
   workflow_dispatch:
 jobs:
   scan:
