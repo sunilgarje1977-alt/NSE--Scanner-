@@ -1,4 +1,4 @@
-name: Backtest 30 Days
+name: 60 Days Backtest v2
 on: workflow_dispatch
 jobs:
   backtest:
@@ -6,7 +6,8 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
-        with: {python-version: '3.10'}
+        with:
+          python-version: '3.10'
       - run: pip install -r requirements.txt
       - env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
@@ -15,4 +16,4 @@ jobs:
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python backtest.py 
+        run: python backtest.py
