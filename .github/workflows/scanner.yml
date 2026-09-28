@@ -1,9 +1,9 @@
 name: Intraday Top 6 Scanner
 
 on:
-  schedule:
-    - cron: '*/5 3-10 * * 1-5'
   workflow_dispatch:
+  schedule:
+    - cron: '*/5 3-10 * * 1-5'  # 8:30 AM to 3:30 PM IST
 
 jobs:
   scan:
@@ -23,11 +23,24 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install smartapi-python pyotp pandas requests logzero websocket-client
+          pip install smartapi-python pyotp requests pandas
 
       - name: Restore Trades State
         run: |
-          if [ -f trades_state.json ]; then echo "State Found"; else echo '{"date":"'$(date +%F)'","active":[],"closed":[],"total":0}' > trades_state.json; fi
+          if [ -f active_trades.json ]; then
+            echo "Found active_trades.json"
+            cat active_trades.json
+          else
+            echo "No active_trades.json found - creating new"
+            echo '{"active":[],"pending":[]}' > active_trades.json
+          fi
+          if [ -f pnl_history.json ]; then
+            echo "Found pnl_history.json"
+            cat pnl_history.json
+          else
+            echo "No pnl_history.json - creating new"
+            echo '[]' > pnl_history.json
+          fi
 
       - name: Run Scanner
         env:
@@ -42,8 +55,8 @@ jobs:
 
       - name: Save State Back to Repo
         run: |
-          git config --global user.name "NSE Bot"
-          git config --global user.email "bot@nse.com"
-          git add trades_state.json || true
-          git diff --staged --quiet || git commit -m "Update trades state $(date +'%H:%M')" || true
-          git push || true
+          git config --global user.name "Scanner Bot"
+          git config --global user.email "bot@scanner.com"
+          git add active_trades.json pnl_history.json
+          git diff --staged --quiet || git commit -m "Update trades state [skip ci]"
+          git push
