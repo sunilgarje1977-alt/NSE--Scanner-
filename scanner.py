@@ -49,8 +49,8 @@ def get_nifty_trend(obj):
     except: return "UP"
     return "UP"
 
-# PRIORITY - SMALL + MID FIRST
-PRIORITY = ["PRAJIND","COCHINSHIP","JWL","TITAGARH","GRSE","HUDCO","NBCC","ZENSAR","VBL","DAMCAPITAL","RSYSTEMS","SMCGLOBAL","SYNCOMF","SDBL","RVNL","IRFC","BEML","BHEL","PFC","RECLTD","IREDA","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","IDEA","BSE","MCX","DIXON","KAYNES","POLYCAB","COFORGE","PERSISTENT","BHARTIARTL","SBIN","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","MARUTI","TITAN","SUNPHARMA","ULTRACEMCO","NTPC","POWERGRID","ONGC","ADANIENT","JSWSTEEL","TATASTEEL","BEL","HAL","TATAPOWER","WIPRO","TECHM","HCLTECH","CIPLA","DIVISLAB","M&M","BAJAJ-AUTO","SBILIFE","VEDL","JSWENERGY","LTIM","APOLLOHOSP","DLF","BANKBARODA","PNB","CANBK","JIOFIN","BALKRISIND"]
+# SMALL+MID FIRST PRIORITY
+PRIORITY = ["PRAJIND","COCHINSHIP","JWL","TITAGARH","GRSE","HUDCO","NBCC","ZENSAR","VBL","DAMCAPITAL","RSYSTEMS","SMCGLOBAL","SYNCOMF","SDBL","RVNL","IRFC","BEML","BHEL","PFC","RECLTD","IREDA","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","IDEA","BSE","MCX","DIXON","KAYNES","POLYCAB","COFORGE","PERSISTENT","NHPC","SJVN","NMDC","SAIL","KPITTECH","RAILTEL","IRCON","MAZAGON","PRAJIND","COCHINSHIP","BHARTIARTL","SBIN","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","MARUTI","TITAN","SUNPHARMA"]
 
 all_syms=[]
 for s in PRIORITY:
@@ -62,10 +62,9 @@ for s in sorted(TOKEN_MAP.keys()):
 all_syms=all_syms[:1000]
 cat_map={s:"LARGE" if i<150 else "MID" if i<500 else "SMALL" for i,s in enumerate(all_syms)}
 
-# FULL DAY 9:15 to 3:00 - SMALL+MIDCAP FOCUS
 SCAN_LIST = all_syms
 WORKERS = 60
-LAYER_NAME = "FULL 1000 | SMALL+MIDCAP 9:15-3:00 ON"
+LAYER_NAME = "v9 SMALL+MID 9:15-3:00 GUARANTEED"
 
 def supertrend_dir(c,h,l, period=10, mult=3):
     try:
@@ -109,7 +108,6 @@ def fast_analyze(args):
         orb_low=min(lows[:6]) if len(lows)>=6 else min(lows)
         body=abs(ltp-last_o); rng=max(highs[-1],last_o)-min(lows[-1],last_o)+1e-9
         wick_pct=1-(body/rng)
-        if wick_pct>0.72: return None
 
         day_low = min(lows); day_high = max(highs); day_open = opens[0]
         recovery_pct = ((ltp - day_low) / (day_low+1e-9)) * 100
@@ -119,66 +117,74 @@ def fast_analyze(args):
         vol_avg_20=float(vol_avg[-1]) if vol_avg[-1]==vol_avg[-1] else 1
         volx = vols[-1]/vol_avg_20 if vol_avg_20>0 else 1
 
+        cat=cat_map.get(sym,"SMALL")
+        is_small_mid = cat in ["SMALL","MID"]
+
+        # WICK FILTER - Small/Mid साठी Relax
+        if is_small_mid:
+            if wick_pct>0.85: return None
+        else:
+            if wick_pct>0.72: return None
+
         buy=0; sell=0; bc=[]; sc=[]
-        # 1 Engulfing
         if ltp>last_o and prev_c<prev_o and (ltp-last_o)>(prev_o-prev_c)*0.7: buy+=1; bc.append("ENG")
         if ltp<last_o and prev_c>prev_o and (last_o-ltp)>(prev_c-prev_o)*0.7: sell+=1; sc.append("ENG")
-        # 2 EMA 9x15
         if ema9[-2]<ema15[-2] and ema9[-1]>ema15[-1]: buy+=1; bc.append("9x15")
         if ema9[-2]>ema15[-2] and ema9[-1]<ema15[-1]: sell+=1; sc.append("9x15")
-        # 3 3Candle
         if c[-3]<c[-2]<c[-1] and c[-1]>ema9[-1]: buy+=1; bc.append("3C")
         if c[-3]>c[-2]>c[-1] and c[-1]<ema9[-1]: sell+=1; sc.append("3C")
-        # 4 VWAP
         if ema9[-1]>vwap[-1] and ltp>vwap[-1]: buy+=1; bc.append("VW+")
         if ema9[-1]<vwap[-1] and ltp<vwap[-1]: sell+=1; sc.append("VW-")
-        # 5 EMA20
         if ltp>ema20[-1] and ema20[-1]>ema20[-2]: buy+=1; bc.append("E20U")
         if ltp<ema20[-1] and ema20[-1]<ema20[-2]: sell+=1; sc.append("E20D")
-        # 6 RSI
         rsi_val=float(rsi[-1]) if rsi[-1]==rsi[-1] else 50
         if 50<=rsi_val<=68: buy+=1; bc.append(f"RSI-B {int(rsi_val)}")
         if 30<=rsi_val<=50: sell+=1.5; sc.append(f"RSI-S {int(rsi_val)}")
-        # 7 MACD
         if macd[-1]>macd_sig[-1]: buy+=1; bc.append("MACD+")
         if macd[-1]<macd_sig[-1]: sell+=1; sc.append("MACD-")
-        # 8 VOL BO/BD
         last_5_high=max(highs[-5:]); last_5_low=min(lows[-5:])
         if vols[-1]>vol_avg_20*1.2 and ltp>=last_5_high*0.998: buy+=1.5; bc.append(f"VOL-BO {volx:.1f}x")
         if vols[-1]>vol_avg_20*1.2 and ltp<=last_5_low*1.002: sell+=1.5; sc.append(f"VOL-BD {volx:.1f}x")
-        # 9 ST+ORB
         if st_dir==1 and ltp>orb_high and wick_pct<0.5: buy+=1; bc.append("ST+ORB")
         if st_dir==-1 and ltp<orb_low and wick_pct<0.5: sell+=1; sc.append("ST+ORB")
-        # 10 Retest
         if abs(ltp-orb_high)/ltp<0.005 and ltp>orb_high: buy+=0.5; bc.append("RETEST")
         if abs(ltp-orb_low)/ltp<0.005 and ltp<orb_low: sell+=0.5; sc.append("RETEST")
-        # 11 RECOVERY BULLISH
         if recovery_pct >= 2.5 and day_gain_pct > 0.5:
             buy+=2.0; bc.append(f"RECOV {recovery_pct:.1f}%")
         if recovery_pct >= 7.0:
             buy+=1.0; bc.append(f"STRONG-RECOV")
-        # 12 MOMENTUM BURST 5m
         if last_5m_chg >= 0.6 and volx>=1.1:
             buy+=2.5; bc.append(f"MOM-BURST {last_5m_chg:.1f}%")
-        elif last_5m_chg >= 0.3 and day_gain_pct>1:
-            buy+=1.0; bc.append(f"MOM {last_5m_chg:.1f}%")
-        # 13 SELL FALL + MOM DOWN
         if fall_from_high >= 2.5 and day_gain_pct < -0.5:
             sell+=2.0; sc.append(f"FALL {fall_from_high:.1f}%")
         if last_5m_chg <= -0.6 and volx>=1.1:
             sell+=2.5; sc.append(f"MOM-DOWN {last_5m_chg:.1f}%")
 
-        # SMALL + MID BONUS - MAIN LOGIC
-        cat=cat_map.get(sym,"SMALL")
-        if cat=="SMALL":
-            if buy>0: buy+=0.7; bc.append("SMALL-BONUS")
-            if sell>0: sell+=0.7; sc.append("SMALL-BONUS")
-        elif cat=="MID":
-            if buy>0: buy+=0.5; bc.append("MID-BONUS")
-            if sell>0: sell+=0.5; sc.append("MID-BONUS")
+        # ===== v9 ULTRA RELAX FOR SMALL+MID =====
+        if is_small_mid:
+            # Day Gain 2%+ असेल तर Direct BUY - Photo सारखे
+            if day_gain_pct >= 1.8 and recovery_pct >= 1.2:
+                buy+=3.0; bc.append(f"SM-DAY+ {day_gain_pct:.1f}%")
+            if day_gain_pct <= -1.8 and fall_from_high >= 1.2:
+                sell+=3.0; sc.append(f"SM-DAY- {day_gain_pct:.1f}%")
+            # 5m मध्ये 0.3% पण वाढला तरी घे
+            if last_5m_chg >= 0.25 and volx >= 0.9:
+                buy+=1.5; bc.append(f"S-MOM {last_5m_chg:.1f}%")
+            if last_5m_chg <= -0.25 and volx >= 0.9:
+                sell+=1.5; sc.append(f"S-MOM-DN {last_5m_chg:.1f}%")
+            # Day High जवळ असेल तर
+            if ltp >= day_high*0.992:
+                buy+=1.0; bc.append("NEAR-HIGH")
 
-        buy_thresh = 3.2 if cat in ["SMALL","MID"] else 4.0
-        sell_thresh = 2.7 if cat in ["SMALL","MID"] else 3.5
+        if cat=="SMALL":
+            if buy>0: buy+=0.7; bc.append("S-BONUS")
+            if sell>0: sell+=0.7; sc.append("S-BONUS")
+        elif cat=="MID":
+            if buy>0: buy+=0.5; bc.append("M-BONUS")
+            if sell>0: sell+=0.5; sc.append("M-BONUS")
+
+        buy_thresh = 2.8 if is_small_mid else 4.0
+        sell_thresh = 2.3 if is_small_mid else 3.5
 
         if buy>=buy_thresh:
             sl=round(min(lows[-6:]),1)
@@ -242,10 +248,16 @@ def get_top(cat,side,exclude=[]):
 
 existing_syms=[a["symbol"] for a in new_active]+[c["symbol"] for c in closed]
 final_trades=[]
-for combo in [("SMALL","BUY"),("MID","BUY"),("SMALL","SELL"),("MID","SELL"),("SMALL","BUY"),("MID","BUY"),("SMALL","SELL"),("LARGE","BUY")]:
+for combo in [("SMALL","BUY"),("MID","BUY"),("SMALL","SELL"),("MID","SELL"),("SMALL","BUY"),("MID","BUY"),("SMALL","BUY"),("MID","SELL")]:
     if len(final_trades)>=DAILY_TARGET: break
     t=get_top(combo[0],combo[1],existing_syms+[x["sym"] for x in final_trades])
     if t: final_trades.append(t)
+
+# जर Small/Mid नाही आला तर Large पण घे - पण आधी Small/Mid
+if len(final_trades)<4:
+    for combo in [("LARGE","BUY"),("LARGE","SELL")]:
+        t=get_top(combo[0],combo[1],existing_syms+[x["sym"] for x in final_trades])
+        if t: final_trades.append(t)
 
 today_count=state.get("today_count",0)+len(closed)
 combined_active=new_active[:]
@@ -274,29 +286,34 @@ win_today=len([p for p in pnl_hist if p["date"]==today_str and p["pnl"]>0]); los
 buy_res=[r for r in results if r["side"]=="BUY"]
 sell_res=[r for r in results if r["side"]=="SELL"]
 
-msg=f"⚡ v8 SMALL+MID | 9:15-3:00 ON | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
+msg=f"⚡ v9 SMALL+MID GUARANTEED | 9:15-3:00 | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
 msg+=f"Scan 1000/1000 | Found {len(results)} (B:{len(buy_res)} S:{len(sell_res)}) | Daily {today_count}/{DAILY_TARGET}\n"
-msg+=f"L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])} <- TARGET\n"
+msg+=f"L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])} <- FIXED!\n"
 msg+="--------------------------------\n"
 
 if buy_res:
-    top_buy=sorted(buy_res, key=lambda x: x["recov"], reverse=True)[:6]
-    msg+=f"🔥 BULLISH RECOVERY (Small+Mid):\n"
-    for b in top_buy:
-        msg+=f"{b['sym']}({b['cat']}) Recov:{b['recov']:.1f}% P:{b['ltp']} Chg:{b['day_chg']:.1f}% 5m:{b['last_5m']:.1f}% | {','.join(b['conds'][:2])}\n"
-    msg+="--------------------------------\n"
-if sell_res:
-    top_sell=sorted(sell_res, key=lambda x: x["recov"], reverse=True)[:3]
-    msg+=f"🔻 BEARISH FALL (Small+Mid):\n"
-    for b in top_sell:
-        msg+=f"{b['sym']}({b['cat']}) Fall:{b['recov']:.1f}% P:{b['ltp']} Chg:{b['day_chg']:.1f}% | {','.join(b['conds'][:2])}\n"
-    msg+="--------------------------------\n"
+    small_buy=[x for x in buy_res if x["cat"] in ["SMALL","MID"]]
+    if small_buy:
+        top_buy=sorted(small_buy, key=lambda x: x["day_chg"], reverse=True)[:6]
+        msg+=f"🔥 BULLISH SMALL+MID ({len(small_buy)}):\n"
+        for b in top_buy:
+            msg+=f"{b['sym']}({b['cat']}) Recov:{b['recov']:.1f}% P:{b['ltp']} Chg:{b['day_chg']:.1f}% 5m:{b['last_5m']:.1f}% | {','.join(b['conds'][:2])}\n"
+        msg+="--------------------------------\n"
 
-burst=[r for r in results if "MOM-BURST" in str(r["conds"])]
+if sell_res:
+    small_sell=[x for x in sell_res if x["cat"] in ["SMALL","MID"]]
+    if small_sell:
+        top_sell=sorted(small_sell, key=lambda x: x["day_chg"])[:3]
+        msg+=f"🔻 BEARISH SMALL+MID ({len(small_sell)}):\n"
+        for b in top_sell:
+            msg+=f"{b['sym']}({b['cat']}) Fall:{b['recov']:.1f}% P:{b['ltp']} Chg:{b['day_chg']:.1f}% | {','.join(b['conds'][:2])}\n"
+        msg+="--------------------------------\n"
+
+burst=[r for r in results if "MOM" in str(r["conds"]) or "SM-DAY" in str(r["conds"])]
 if burst:
-    msg+=f"⚡ MOMENTUM BURST 5m:\n"
+    msg+=f"⚡ MOMENTUM SMALL+MID:\n"
     for m in sorted(burst, key=lambda x: x["last_5m"], reverse=True)[:5]:
-        msg+=f"{m['side']} {m['sym']}({m['cat']}) {m['ltp']} 5m:{m['last_5m']:.1f}% Vol:{m['volx']:.1f}x\n"
+        msg+=f"{m['side']} {m['sym']}({m['cat']}) {m['ltp']} 5m:{m['last_5m']:.1f}% D:{m['day_chg']:.1f}% Vol:{m['volx']:.1f}x\n"
     msg+="--------------------------------\n"
 
 if closed:
@@ -312,7 +329,7 @@ if pending:
     for p in pending[:4]: msg+=f"{p['side']} {p['symbol']}({p['cat']}) E:{p['price']} SL:{p['sl']}\n"
     msg+="--------------------------------\n"
 msg+=f"📈 TODAY: {today_pnl:.2f} | TOTAL: {total_pnl:.2f} | W:{win_today} L:{loss_today} | WR:{(win/total_trades*100 if total_trades>0 else 0):.1f}%\n"
-msg+=f"SMALL 0.7 + MID 0.5 BONUS | Thresh S/M 3.2/2.7 | RECOV>=2.5% MOM>=0.6%\n"
+msg+=f"v9 FIX: S/M Day>=1.8% =3pt | MOM 0.25% | Thresh 2.8/2.3 | Wick 0.85\n"
 
 send_tg(os.getenv("TELEGRAM_BOT_TOKEN","").strip(), os.getenv("TELEGRAM_CHAT_ID","").strip(), msg)
 print(msg)
