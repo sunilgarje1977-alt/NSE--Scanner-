@@ -1,62 +1,28 @@
-name: Intraday Top 6 Scanner
-
+name: Run Scanner
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 3-10 * * 1-5'  # 8:30 AM to 3:30 PM IST
-
+    - cron: '*/5 3-10 * * 1-5'
 jobs:
   scan:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
-      - name: Install Dependencies
-        run: |
-          pip install smartapi-python pyotp requests pandas
-
-      - name: Restore Trades State
-        run: |
-          if [ -f active_trades.json ]; then
-            echo "Found active_trades.json"
-            cat active_trades.json
-          else
-            echo "No active_trades.json found - creating new"
-            echo '{"active":[],"pending":[]}' > active_trades.json
-          fi
-          if [ -f pnl_history.json ]; then
-            echo "Found pnl_history.json"
-            cat pnl_history.json
-          else
-            echo "No pnl_history.json - creating new"
-            echo '[]' > pnl_history.json
-          fi
-
-      - name: Run Scanner
-        env:
+      - run: pip install -r requirements.txt
+      - env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python scanner.py
-
-      - name: Save State Back to Repo
-        run: |
-          git config --global user.name "Scanner Bot"
-          git config --global user.email "bot@scanner.com"
-          git add active_trades.json pnl_history.json
-          git diff --staged --quiet || git commit -m "Update trades state [skip ci]"
-          git push
+        run: python scanner.py
+      - run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add active_trades.json pnl_history.json || true
+          git diff --quiet --cached || git commit -m "Update trades"
+          git push || true
