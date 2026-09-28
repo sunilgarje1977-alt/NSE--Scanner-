@@ -163,7 +163,6 @@ def fast_analyze(args):
         if st_dir==1 and ltp>orb_high: buy+=1; bc.append("ST+ORB")
         if st_dir==-1 and ltp<orb_low: sell+=1; sc.append("ST+ORB")
 
-        # ===== v13 BULLISH FIX - Nifty DOWN मध्ये पण Bullish येईल =====
         if is_small_mid:
             nifty_down_bonus = 1.5 if nifty_trend=="DOWN" and day_gain_pct>0 else 0
             if day_gain_pct >= 0.1:
@@ -188,6 +187,13 @@ def fast_analyze(args):
 
         buy_thresh = 1.8 if is_small_mid else 3.5
         sell_thresh = 1.4 if is_small_mid else 3.0
+
+        # ===== v14 PERFECT FILTER =====
+        if is_small_mid:
+            if buy>=buy_thresh and day_gain_pct < 0.0:
+                return None
+            if sell>=sell_thresh and day_gain_pct > 0.6:
+                return None
 
         if buy>=buy_thresh:
             sl=round(min(lows[-6:]),1)
@@ -287,7 +293,7 @@ win_today=len([p for p in pnl_hist if p["date"]==today_str and p["pnl"]>0]); los
 buy_res=[r for r in results if r["side"]=="BUY"]
 sell_res=[r for r in results if r["side"]=="SELL"]
 
-msg=f"⚡ v13 BULLISH FIX | SMALL+MID + 5m BO | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
+msg=f"⚡ v14 PERFECT | SMALL+MID + 5m BO + TARGET | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
 msg+=f"Scan 1000/1000 | Found {len(results)} (B:{len(buy_res)} S:{len(sell_res)}) | Daily {today_count}/{DAILY_TARGET}\n"
 msg+=f"L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])}\n"
 msg+="--------------------------------\n"
@@ -323,7 +329,7 @@ if pending:
         msg+=f"{p['side']} {p['symbol']}({p['cat']}) E:{p['price']} T1:{p['t1']} T2:{p['t2']} SL:{p['sl']}\n"
     msg+="--------------------------------\n"
 msg+=f"📈 TODAY: {today_pnl:.2f} | TOTAL: {total_pnl:.2f} | W:{win_today} L:{loss_today}\n"
-msg+=f"v13: Bullish 0.1% | VS-NIFTY Bonus | T1/T2 ON | Thresh 1.8/1.4\n"
+msg+=f"v14: PERFECT FILTER | Bull Green Only | Bear Red Only | T1/T2\n"
 
 send_tg(os.getenv("TELEGRAM_BOT_TOKEN","").strip(), os.getenv("TELEGRAM_CHAT_ID","").strip(), msg)
 print(msg)
