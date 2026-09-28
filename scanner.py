@@ -21,61 +21,53 @@ if not os.path.exists("scrip_master.json"):
 with open("scrip_master.json") as f: master=json.load(f)
 token_map={s['name']:s['token'] for s in master if s['exch_seg']=='NSE' and s['symbol'].endswith('-EQ')}
 
-# === BALANCED NSE 750 - LARGE 20 + MID 20 + SMALL 20 ===
+# === TOP GAINER = BUY ONLY, TOP LOSER = SELL ONLY ===
 def get_nse_750_movers():
     headers={"User-Agent":"Mozilla/5.0"}
     s=requests.Session()
     try: s.get("https://www.nseindia.com",headers=headers,timeout=5)
     except: pass
     
-    final_list=[]
-    indices = [("NIFTY 100","LARGE"), ("NIFTY MIDCAP 150","MID"), ("NIFTY SMALLCAP 250","SMALL")]
-    
-    for idx_name, cat in indices:
+    gainers=[]; losers=[]
+    for idx in ["NIFTY 100","NIFTY MIDCAP 150","NIFTY SMALLCAP 250"]:
         try:
-            url=f"https://www.nseindia.com/api/equity-stockIndices?index={idx_name.replace(' ','%20')}"
+            url=f"https://www.nseindia.com/api/equity-stockIndices?index={idx.replace(' ','%20')}"
             r=s.get(url,headers=headers,timeout=10).json()
             if 'data' in r:
-                data = [x for x in r['data'] if x.get('lastPrice',0)>50]
-                df = pd.DataFrame(data).sort_values('pChange', ascending=False)
-                top10 = df.head(10)['symbol'].tolist() # Top 10 Gainers of this cap
-                bottom10 = df.tail(10)['symbol'].tolist() # Top 10 Losers of this cap
-                final_list.extend(top10 + bottom10)
-                print(f"{cat} {idx_name}: Gainers {top10[:2]} Losers {bottom10[:2]}")
-        except Exception as e:
-            print(f"{cat} Fail {e}")
+                data=[x for x in r['data'] if x.get('lastPrice',0)>50]
+                df=pd.DataFrame(data).sort_values('pChange', ascending=False)
+                # Large+Mid+Small मधून प्रत्येकी 7 Gainer + 7 Loser
+                gainers.extend(df.head(7)['symbol'].tolist())
+                losers.extend(df.tail(7)['symbol'].tolist())
+        except: continue
 
-    if len(final_list)<30:
-        print("API Fail -> Hardcoded Balanced Mix")
-        final_list = [
-            # LARGE 20
-            "RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","MARUTI","TITAN","SUNPHARMA","NTPC","POWERGRID","ONGC","TATAMOTORS","JSWSTEEL","TATASTEEL","BAJFINANCE","ULTRACEMCO",
-            # MID 20
-            "HAL","BEL","BDL","MAZDOCK","RVNL","IRFC","PFC","RECLTD","BHEL","SAIL","NHPC","SJVN","NMDC","BANKBARODA","PNB","CANBK","IDFCFIRSTB","ASHOKLEY","MOTHERSON","TATAPOWER",
-            # SMALL 20
-            "POLYCAB","DIXON","KPITTECH","PERSISTENT","BSE","CDSL","KAYNES","TATAELXSI","IEX","MCX","SUZLON","ZOMATO","IRCTC","IDEA","YESBANK","HFCL","NBCC","JPASSOCIAT","RENUKA","RPOWER"
-        ]
-    return final_list[:60]
+    if len(gainers)<15:
+        gainers=["POLYCAB","DIXON","KAYNES","BSE","HAL","BEL","BHEL","PFC","RECLTD","RVNL","TATAPOWER","TATAMOTORS","JSWSTEEL","RELIANCE","MARUTI","TITAN","NTPC","POWERGRID","COALINDIA","M&M","KPITTECH"]
+        losers=["SUZLON","IDEA","YESBANK","IRFC","SAIL","NHPC","SJVN","NMDC","BANKBARODA","PNB","CANBK","IDFCFIRSTB","ZOMATO","IRCTC","IEX","CDSL","MCX","TATAELXSI","LTTS","COFORGE","PERSISTENT"]
+
+    print(f"GAINERS {len(gainers)}: {gainers[:5]} | LOSERS {len(losers)}: {losers[:5]}")
+    return gainers[:21], losers[:21] # Large7+Mid7+Small7 = 21+21 = 42
 
 def get_pat(df):
     if len(df)<4: return []
-    c2=df.iloc[-2]; c=df.iloc[-1]
-    pats=[]; body=abs(c['Close']-c['Open'])+0.1
+    c1=df.iloc[-2]; c=df.iloc[-1]
+    pats=[]; body=abs(c['Close']-c['Open'])+1.0
     low=min(c['Open'],c['Close'])-c['Low']; up=c['High']-max(c['Open'],c['Close'])
-    if low>body*1.8: pats.append("HAMMER")
-    if up>body*1.8: pats.append("INV_HAMMER")
-    if c2['Close']<c2['Open'] and c['Close']>c['Open'] and c['Close']>c2['Open']: pats.append("BULL_ENGULF")
-    if c2['Close']>c2['Open'] and c['Close']<c['Open'] and c['Close']<c2['Open']: pats.append("BEAR_ENGULF")
+    if low>body*2.0 and c['Close']>c['Open']: pats.append("HAMMER")
+    if up>body*2.0 and c['Close']<c['Open']: pats.append("INV_HAMMER")
+    vol_ok=c['Volume']>df['Volume'].iloc[-6:-1].mean()*1.05
+    if c1['Close']<c1['Open'] and c['Close']>c['Open'] and c['Close']>c1['Open'] and vol_ok: pats.append("BULL_ENGULF")
+    if c1['Close']>c1['Open'] and c['Close']<c['Open'] and c['Close']<c1['Open'] and vol_ok: pats.append("BEAR_ENGULF")
     return pats
 
-def analyze(sym):
+def analyze(sym, mode):
     try:
         token=token_map.get(sym)
         if not token: return None
         fdate=(ist_now-timedelta(days=5)).strftime("%Y-%m-%d %H:%M"); tdate=ist_now.strftime("%Y-%m-%d %H:%M")
         data=smart.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIFTEEN_MINUTE","fromdate":fdate,"todate":tdate})['data']
         df=pd.DataFrame(data,columns=['Time','Open','High','Low','Close','Volume'])
-        if len(df)<35: return None
+        if len(df)<30: return None
         ltp=df['Close'].iloc[-1]
         if ltp<50: return None
         df['EMA9']=df['Close'].ewm(9).mean(); df['EMA15']=df['Close'].ewm(15).mean()
@@ -86,40 +78,41 @@ def analyze(sym):
         atr=tr.rolling(10).mean(); up=hl2+3*atr; st=-1 if df['Close'].iloc[-1]>up.iloc[-2] else 1
         c=df.iloc[-1]; c3h=df['High'].iloc[-4:-1].max(); c3l=df['Low'].iloc[-4:-1].min(); vavg=df['Volume'].iloc[-11:-1].mean()
         pats=get_pat(df)
-        buy_pat=any(p in pats for p in ["HAMMER","BULL_ENGULF"]); sell_pat=any(p in pats for p in ["INV_HAMMER","BEAR_ENGULF"])
-        buy_score=sum([c['Close']>c3h, c['EMA9']>c['VWAP'], c['EMA15']>c['VWAP'], st<0, c['RSI']>55, df['MACD'].iloc[-1]>0, c['Volume']>vavg])
-        sell_score=sum([c['Close']<c3l, c['EMA9']<c['VWAP'], c['EMA15']<c['VWAP'], st>0, c['RSI']<45, df['MACD'].iloc[-1]<0, c['Volume']>vavg])
-        if buy_pat and buy_score>=5:
-            sl=min(c3l,ltp*0.985); r=ltp-sl; 
-            if r<ltp*0.004: return None
-            return {"t":"BUY","s":sym,"sc":f"{buy_score+1}/8","p":"+ ".join(pats),"ltp":ltp,"sl":sl,"t1":ltp+r*2,"t2":ltp+r*4,"tier":"STAR ⭐"}
-        if buy_score>=6:
-            sl=min(c3l,ltp*0.985); r=ltp-sl;
-            if r<ltp*0.004: return None
-            return {"t":"BUY","s":sym,"sc":f"{buy_score}/7","p":"7/7 SETUP","ltp":ltp,"sl":sl,"t1":ltp+r*2,"t2":ltp+r*4,"tier":"GOOD"}
-        if sell_pat and sell_score>=5:
-            sl=max(c3h,ltp*1.015); r=sl-ltp;
-            if r<ltp*0.004: return None
-            return {"t":"SELL","s":sym,"sc":f"{sell_score+1}/8","p":"+ ".join(pats),"ltp":ltp,"sl":sl,"t1":ltp-r*2,"t2":ltp-r*4,"tier":"STAR ⭐"}
-        if sell_score>=6:
-            sl=max(c3h,ltp*1.015); r=sl-ltp;
-            if r<ltp*0.004: return None
-            return {"t":"SELL","s":sym,"sc":f"{sell_score}/7","p":"7/7 SETUP","ltp":ltp,"sl":sl,"t1":ltp-r*2,"t2":ltp-r*4,"tier":"GOOD"}
+        
+        # === CONDITION MATCH ===
+        if mode=="GAINER":
+            buy_score=sum([c['Close']>c3h, c['EMA9']>c['VWAP'], c['EMA15']>c['VWAP'], st<0, c['RSI']>50, df['MACD'].iloc[-1]>0, c['Volume']>vavg*0.9])
+            if buy_score>=5:
+                sl=min(c3l,ltp*0.985); r=ltp-sl
+                if r<ltp*0.003: return None
+                tier="STAR ⭐" if any(p in pats for p in ["HAMMER","BULL_ENGULF"]) else "GOOD"
+                return {"t":"BUY","s":sym,"sc":f"{buy_score}/7","p":"+ ".join(pats) if pats else "TOP GAINER 5/7","ltp":ltp,"sl":sl,"t1":ltp+r*2,"t2":ltp+r*4,"tier":tier}
+        else: # LOSER
+            sell_score=sum([c['Close']<c3l, c['EMA9']<c['VWAP'], c['EMA15']<c['VWAP'], st>0, c['RSI']<50, df['MACD'].iloc[-1]<0, c['Volume']>vavg*0.9])
+            if sell_score>=5:
+                sl=max(c3h,ltp*1.015); r=sl-ltp
+                if r<ltp*0.003: return None
+                tier="STAR ⭐" if any(p in pats for p in ["INV_HAMMER","BEAR_ENGULF"]) else "GOOD"
+                return {"t":"SELL","s":sym,"sc":f"{sell_score}/7","p":"+ ".join(pats) if pats else "TOP LOSER 5/7","ltp":ltp,"sl":sl,"t1":ltp-r*2,"t2":ltp-r*4,"tier":tier}
     except: return None
 
-movers=get_nse_750_movers(); buys=[]; sells=[]
-for sym in movers[:60]:
-    res=analyze(sym)
-    if res:
-        if res['t']=='BUY' and len(buys)<15: buys.append(res)
-        if res['t']=='SELL' and len(sells)<15: sells.append(res)
+gainers_list, losers_list = get_nse_750_movers()
+buys=[]; sells=[]
 
-msg=f"🔥 LIVE 7/7 BALANCED | {ist_now.strftime('%d %b %H:%M')} IST\nLARGE(20)+MID(20)+SMALL(20) = 60 Scan\n\nBUY ({len(buys)}):\n"
-if buys:
-    for r in buys: msg+=f"{r['tier']} {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
-else: msg+="No BUY Now\n"
-msg+=f"\nSELL ({len(sells)}):\n"
-if sells:
-    for r in sells: msg+=f"{r['tier']} {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
-else: msg+="No SELL Now\n"
+for sym in gainers_list:
+    res=analyze(sym, "GAINER")
+    if res and len(buys)<10: buys.append(res)
+
+for sym in losers_list:
+    res=analyze(sym, "LOSER")
+    if res and len(sells)<10: sells.append(res)
+
+msg=f"🔥 LIVE MATCHED | {ist_now.strftime('%d %b %H:%M')} IST\nGainer=BUY Only | Loser=SELL Only\nLARGE7+MID7+SMALL7\n\nTOP GAINER BUY ({len(buys)}):\n"
+for r in buys: msg+=f"{r['tier']} {r['t']} {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
+if not buys: msg+="No BUY in Gainers Now\n"
+
+msg+=f"\nTOP LOSER SELL ({len(sells)}):\n"
+for r in sells: msg+=f"{r['tier']} {r['t']} {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
+if not sells: msg+="No SELL in Losers Now\n"
+
 print(msg); send_tg(msg)
