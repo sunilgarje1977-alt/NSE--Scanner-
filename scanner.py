@@ -1,201 +1,190 @@
-import os, json, pyotp, urllib.request, pandas as pd, requests, numpy as np
-from datetime import datetime, timedelta, timezone
+import requests, json, os, time, pyotp
 from SmartApi import SmartConnect
+import pandas as pd
 
-def clean(k): return os.getenv(k,"").strip().strip('"').strip("'")
-API_KEY=clean('ANGEL_API_KEY'); CLIENT_ID=clean('ANGEL_CLIENT_ID'); PWD=clean('ANGEL_PASSWORD'); TOTP_SECRET=clean('ANGEL_TOTP_SECRET')
-TELE_TOKEN=clean('TELEGRAM_BOT_TOKEN'); TELE_CHAT=clean('TELEGRAM_CHAT_ID')
-STATE_FILE="trades_state.json"
+# FIX 1: On Time Signal साठी 70 Sec थांब - Candle Close नंतर
+print("Waiting 70 sec for Candle Close...")
+time.sleep(70)
 
-smart=SmartConnect(api_key=API_KEY)
-smart.generateSession(CLIENT_ID,PWD,pyotp.TOTP(TOTP_SECRET).now())
+# --- CONFIG ---
+STATE_FILE = "active_trades.json"
+SCAN_MSG_FILE = "last_scan.json"
 
-def send_tg(msg):
-    try: requests.get(f"https://api.telegram.org/bot{TELE_TOKEN}/sendMessage", params={"chat_id":TELE_CHAT,"text":msg}, timeout=15)
-    except: pass
+def load_state():
+    if not os.path.exists(STATE_FILE): return {"active":[], "pending":[]}
+    try:
+        with open(STATE_FILE,'r') as f:
+            data=json.load(f)
+            # FIX: Bool Error - List नसेल तर empty कर
+            if not isinstance(data.get("active"), list): data["active"]=[]
+            if not isinstance(data.get("pending"), list): data["pending"]=[]
+            return data
+    except: return {"active":[], "pending":[]}
 
-IST = timezone(timedelta(hours=5, minutes=30))
-ist_now = datetime.now(IST)
+def save_state(active, pending):
+    with open(STATE_FILE,'w') as f:
+        json.dump({"active":active, "pending":pending}, f)
 
-if not os.path.exists("scrip_master.json"):
-    urllib.request.urlretrieve("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json","scrip_master.json")
-with open("scrip_master.json") as f: master=json.load(f)
-token_map={s['name']:s['token'] for s in master if s['exch_seg']=='NSE' and s['symbol'].endswith('-EQ')}
+def get_token_map():
+    try:
+        url="https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
+        data=requests.get(url,timeout=20).json()
+        mp={}
+        for i in data:
+            if i.get('exch_seg')=='NSE' and i.get('symbol'):
+                sym=i['symbol'].replace('-EQ','')
+                mp[sym]=i['token']
+        return mp
+    except: return {}
+
+TOKEN_MAP=get_token_map()
 
 def get_top_movers():
     headers={"User-Agent":"Mozilla/5.0"}
     s=requests.Session()
     try: s.get("https://www.nseindia.com",headers=headers,timeout=5)
     except: pass
-    gainers=[]; losers=[]
+
+    # FIX 2 & 3: Large + Mid + Smallcap कायम Scan - 9:25 + Midcap साठी
+    permanent = ["NTPC","POWERGRID","ONGC","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BANKBARODA","PNB","CANBK","BEL","HAL","BHEL","TATAPOWER","TATASTEEL","JSWSTEEL","HINDALCO","LT","MARUTI","TITAN","ZOMATO","PAYTM","IRFC","RVNL","BSE","CDSL","MCX","KAYNES","DIXON","POLYCAB","COFORGE","PERSISTENT","PFC","RECLTD","SUZLON","IEX","TATAELXSI","IDEA","YESBANK","IDFCFIRSTB","SAIL","NHPC","COALINDIA","ADANIENT","ADANIPORTS"]
+
+    gainers=list(permanent); losers=list(permanent)
     for idx in ["NIFTY 100","NIFTY MIDCAP 150","NIFTY SMALLCAP 250"]:
         try:
-            r=s.get(f"https://www.nseindia.com/api/equity-stockIndices?index={idx.replace(' ','%20')}",headers=headers,timeout=10).json()
+            url=f"https://www.nseindia.com/api/equity-stockIndices?index={idx.replace(' ','%20')}"
+            r=s.get(url,headers=headers,timeout=10).json()
             if 'data' in r:
                 df=pd.DataFrame(r['data'])
                 df=df[df['lastPrice']>30]
                 df=df.sort_values('pChange',ascending=False)
-                gainers.extend(df.head(15)['symbol'].tolist())
-                losers.extend(df.tail(15)['symbol'].tolist())
+                # FIX: 15 नाही तर 30 - Mid Smallcap पण येईल!
+                gainers.extend(df.head(30)['symbol'].tolist())
+                losers.extend(df.tail(30)['symbol'].tolist())
         except: continue
-    if not gainers:
-        gainers=["KAYNES","POLYCAB","DIXON","BSE","CDSL","HAL","BEL","BHEL","RVNL","PFC","RECLTD","ZOMATO","TITAN","MARUTI","RELIANCE","TCS","INFY","COFORGE","LTTS","MCX"]
-        losers=["BANKBARODA","PNB","CANBK","IDFCFIRSTB","SUZLON","YESBANK","IEX","TATAPOWER","IRFC","NHPC","SAIL","NTPC","TATAELXSI","IDEA"]
-    return list(dict.fromkeys(gainers))[:35], list(dict.fromkeys(losers))[:35]
 
-def analyze(sym, side):
+    gainers=list(dict.fromkeys(gainers))[:50]
+    losers=list(dict.fromkeys(losers))[:50]
+    print(f"SCAN LIST: Gainers {len(gainers)} Losers {len(losers)} Total {len(gainers)+len(losers)}")
+    return gainers, losers
+
+def get_candles(obj, token):
     try:
-        token=token_map.get(sym)
-        if not token: return None
-        fdate=(ist_now-timedelta(days=3)).strftime("%Y-%m-%d %H:%M"); tdate=ist_now.strftime("%Y-%m-%d %H:%M")
-        data=smart.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":fdate,"todate":tdate})['data']
-        df=pd.DataFrame(data,columns=['Time','Open','High','Low','Close','Volume'])
-        if len(df)<30: return None
-        ltp=float(df['Close'].iloc[-1])
-        if ltp<30 or ltp>9000: return None
-
-        df['EMA9']=df['Close'].ewm(9).mean()
-        df['EMA15']=df['Close'].ewm(15).mean()
-        df['VWAP']=((df['High']+df['Low']+df['Close'])/3 * df['Volume']).cumsum()/df['Volume'].cumsum()
-        delta=df['Close'].diff(); gain=delta.clip(lower=0).ewm(alpha=1/14).mean(); loss=(-delta.clip(upper=0)).ewm(alpha=1/14).mean()
-        df['RSI']=100-(100/(1+gain/loss))
-        df['MACD']=df['Close'].ewm(12).mean()-df['Close'].ewm(26).mean()
-        hl2=(df['High']+df['Low'])/2; tr=pd.concat([df['High']-df['Low'],(df['High']-df['Close'].shift()).abs(),(df['Low']-df['Close'].shift()).abs()],axis=1).max(axis=1)
-        atr=tr.rolling(10).mean(); upper=hl2+2.0*atr
-        st=-1 if float(df['Close'].iloc[-1])>float(upper.iloc[-2]) else 1
-
-        c=df.iloc[-1]; c1=df.iloc[-2]
-        vavg=float(df['Volume'].iloc[-11:-1].mean())
-        c3h=float(df['High'].iloc[-4:-1].max()); c3l=float(df['Low'].iloc[-4:-1].min())
-        vol=float(c['Volume']); close=float(c['Close']); ema9=float(c['EMA9']); vwap=float(c['VWAP']); ema15=float(df['EMA15'].iloc[-1]); rsi=float(c['RSI']); macd=float(df['MACD'].iloc[-1])
-
-        pat=""; body=abs(float(c['Close'])-float(c['Open']))+0.1
-        low_wick=min(float(c['Open']),float(c['Close']))-float(c['Low']); up_wick=float(c['High'])-max(float(c['Open']),float(c['Close']))
-        if low_wick>body*1.5 and float(c['Close'])>float(c['Open']): pat="HAMMER"
-        elif up_wick>body*1.5 and float(c['Close'])<float(c['Open']): pat="INV_HAMMER"
-        elif float(c1['Close'])<float(c1['Open']) and float(c['Close'])>float(c['Open']) and float(c['Close'])>float(c1['Open']): pat="BULL_ENGULF"
-        elif float(c1['Close'])>float(c1['Open']) and float(c['Close'])<float(c['Open']) and float(c['Close'])<float(c1['Open']): pat="BEAR_ENGULF"
-
-        ema9_prev=float(df['EMA9'].iloc[-2]); ema15_prev=float(df['EMA15'].iloc[-2])
-        ema_cross_up = ema9 > ema15
-        ema_cross_down = ema9 < ema15
-        fresh_up = bool(ema9_prev <= ema15_prev and ema9 > ema15)
-        fresh_down = bool(ema9_prev >= ema15_prev and ema9 < ema15)
-
-        buy_score=0; buy_cond=[]
-        if close>c3h: buy_score+=1; buy_cond.append("3CBO")
-        if ema9>vwap: buy_score+=1; buy_cond.append("E9>V")
-        if ema15>vwap: buy_score+=1; buy_cond.append("E15>V")
-        if ema_cross_up: buy_score+=1; buy_cond.append("9x15UP*" if fresh_up else "9x15UP")
-        if st<0: buy_score+=1; buy_cond.append("ST_G")
-        if rsi>45 and rsi<78: buy_score+=1; buy_cond.append(f"RSI{int(rsi)}")
-        if macd>0: buy_score+=1; buy_cond.append("MACD+")
-        if vol>vavg*0.7: buy_score+=1; buy_cond.append("VOL")
-
-        sell_score=0; sell_cond=[]
-        if close<c3l: sell_score+=1; sell_cond.append("3CBD")
-        if ema9<vwap: sell_score+=1; sell_cond.append("E9<V")
-        if ema15<vwap: sell_score+=1; sell_cond.append("E15<V")
-        if ema_cross_down: sell_score+=1; sell_cond.append("9x15DN*" if fresh_down else "9x15DN")
-        if st>0: sell_score+=1; sell_cond.append("ST_R")
-        if rsi<55 and rsi>22: sell_score+=1; sell_cond.append(f"RSI{int(rsi)}")
-        if macd<0: sell_score+=1; sell_cond.append("MACD-")
-        if vol>vavg*0.7: sell_score+=1; sell_cond.append("VOL")
-
-        # FIX: All python types
-        if side=="BUY" and buy_score>=5:
-            return {"type":"BUY","symbol":str(sym),"score":int(buy_score),"cond":",".join(buy_cond),"pat":str(pat or "9x15 CROSS"),"ltp":float(ltp),"sl":float(ltp*0.994),"t1":float(ltp*1.01),"t2":float(ltp*1.02),"rank":int(buy_score+(2 if pat else 0)+(1 if fresh_up else 0)),"tier":"STAR ⭐" if pat and fresh_up else "GOOD","fresh":bool(fresh_up)}
-        if side=="SELL" and sell_score>=5:
-            return {"type":"SELL","symbol":str(sym),"score":int(sell_score),"cond":",".join(sell_cond),"pat":str(pat or "9x15 CROSS"),"ltp":float(ltp),"sl":float(ltp*1.006),"t1":float(ltp*0.99),"t2":float(ltp*0.98),"rank":int(sell_score+(2 if pat else 0)+(1 if fresh_down else 0)),"tier":"STAR ⭐" if pat and fresh_down else "GOOD","fresh":bool(fresh_down)}
+        param={"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":"2025-09-23 09:15","todate":"2025-09-28 15:30"}
+        data=obj.getCandleData(param)
+        if not data or 'data' not in data or not data['data']: return None
+        df=pd.DataFrame(data['data'], columns=['ts','o','h','l','c','v'])
+        return df
     except: return None
 
-def load_state():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE) as f: st=json.load(f)
-            if st.get('date')!=ist_now.strftime("%Y-%m-%d"):
-                return {"date":ist_now.strftime("%Y-%m-%d"),"active":[],"closed":[],"pending":[]}
-            for k in ["pending","closed","active"]:
-                if k not in st: st[k]=[]
-            return st
-        except: pass
-    return {"date":ist_now.strftime("%Y-%m-%d"),"active":[],"closed":[],"pending":[]}
+def analyze(df):
+    if df is None or len(df)<30: return None
+    df['ema9']=df['c'].ewm(span=9).mean()
+    df['ema15']=df['c'].ewm(span=15).mean()
+    df['vwap']=(df['c']*df['v']).cumsum()/df['v'].cumsum()
+    # RSI
+    delta=df['c'].diff()
+    gain=delta.where(delta>0,0).rolling(14).mean()
+    loss=-delta.where(delta<0,0).rolling(14).mean()
+    rs= gain/loss
+    df['rsi']=100-(100/(1+rs))
+    # Supertrend simple (Close > EMA20)
+    df['st_dir']= (df['c'] > df['c'].ewm(span=10).mean()).astype(int)
+    df['st_dir']= df['st_dir'].apply(lambda x: 1 if x==1 else -1)
+    # MACD
+    ema12=df['c'].ewm(span=12).mean()
+    ema26=df['c'].ewm(span=26).mean()
+    df['macd']=ema12-ema26
+    df['macd_sig']=df['macd'].ewm(span=9).mean()
+    df['vol_avg']=df['v'].rolling(20).mean()
+
+    last=df.iloc[-1]; prev=df.iloc[-2]
+    ltp=last['c']; vol=last['v']; vavg=last['vol_avg']
+
+    # Conditions
+    bull_engulf = last['c']>last['o'] and prev['c']<prev['o'] and last['c']>prev['o']
+    bear_engulf = last['c']<last['o'] and prev['c']>prev['o'] and last['c']<prev['o']
+    cross_up = prev['ema9']<prev['ema15'] and last['ema9']>last['ema15']
+    cross_dn = prev['ema9']>prev['ema15'] and last['ema9']<last['ema15']
+    cbd3 = df['c'].iloc[-3:].is_monotonic_decreasing and len(df)>=3
+    cbu3 = df['c'].iloc[-3:].is_monotonic_increasing and len(df)>=3
+
+    buy_score=0; sell_score=0
+    buy_cond=[]; sell_cond=[]
+
+    if bull_engulf: buy_score+=1; buy_cond.append("BULL_ENGULF")
+    if bear_engulf: sell_score+=1; sell_cond.append("BEAR_ENGULF")
+    if cross_up: buy_score+=1; buy_cond.append("9x15 UP")
+    if cross_dn: sell_score+=1; sell_cond.append("9x15DN")
+    if cbu3: buy_score+=1; buy_cond.append("3CBU")
+    if cbd3: sell_score+=1; sell_cond.append("3CBD")
+    if last['ema9']>last['vwap']: buy_score+=1; buy_cond.append("E9>V")
+    if last['ema9']<last['vwap']: sell_score+=1; sell_cond.append("E9<V")
+    if last['ema15']>last['vwap']: buy_score+=1; buy_cond.append("E15>V")
+    if last['ema15']<last['vwap']: sell_score+=1; sell_cond.append("E15<V")
+    if last['st_dir']==1: buy_score+=1; buy_cond.append("ST_G")
+    if last['st_dir']==-1: sell_score+=1; sell_cond.append("ST_R")
+    if last['rsi']>40 and last['rsi']<70: buy_score+=1; buy_cond.append(f"RSI{int(last['rsi'])}")
+    if last['rsi']<60 and last['rsi']>20: sell_score+=1; sell_cond.append(f"RSI{int(last['rsi'])}")
+    if last['macd']>last['macd_sig']: buy_score+=1; buy_cond.append("MACD+")
+    if last['macd']<last['macd_sig']: sell_score+=1; sell_cond.append("MACD-")
+
+    # FIX: Smallcap साठी Volume 0.5 - Midcap Signal साठी
+    vol_need = vavg*0.5 if ltp<500 else vavg*0.7
+    if vol>vol_need:
+        buy_score+=0.5; sell_score+=0.5
+        buy_cond.append("VOL"); sell_cond.append("VOL")
+
+    if buy_score>=5: return ("BUY", buy_score, buy_cond, ltp)
+    if sell_score>=5: return ("SELL", sell_score, sell_cond, ltp)
+    return None
+
+# --- MAIN ---
+api_key=os.getenv("ANGEL_API_KEY")
+client_id=os.getenv("ANGEL_CLIENT_ID")
+pwd=os.getenv("ANGEL_PASSWORD")
+totp_secret=os.getenv("ANGEL_TOTP_SECRET")
+bot_token=os.getenv("TELEGRAM_BOT_TOKEN")
+chat_id=os.getenv("TELEGRAM_CHAT_ID")
+
+obj=SmartConnect(api_key=api_key)
+totp=pyotp.TOTP(totp_secret).now()
+data=obj.generateSession(client_id,pwd,totp)
 
 state=load_state()
-new_active=[]; trail_msg=""
-for tr in state['active']:
-    try:
-        token=token_map.get(tr['symbol']);
-        if not token: continue
-        data=smart.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":(ist_now-timedelta(hours=1)).strftime("%Y-%m-%d %H:%M"),"todate":ist_now.strftime("%Y-%m-%d %H:%M")})['data']
-        ltp=float(data[-1][4])
-        if tr['type']=="BUY":
-            pct=(ltp/float(tr['entry'])-1)*100
-            if pct>=1.0 and not bool(tr.get('trailed')): tr['sl']=float(tr['entry'])*1.005; tr['trailed']=True; trail_msg+=f"🔄 TRAIL BUY {tr['symbol']} 1% Hit SL->{tr['sl']:.1f}\n"
-            if ltp<=float(tr['sl']) or pct>=2.0 or pct<=-0.6:
-                state['closed'].append({**tr,"exit":float(ltp),"pnl":float(pct)}); trail_msg+=f"✅ CLOSED BUY {tr['symbol']} {pct:.2f}%\n"; continue
-        else:
-            pct=(1-ltp/float(tr['entry']))*100
-            if pct>=1.0 and not bool(tr.get('trailed')): tr['sl']=float(tr['entry'])*0.995; tr['trailed']=True; trail_msg+=f"🔄 TRAIL SELL {tr['symbol']} 1% Hit SL->{tr['sl']:.1f}\n"
-            if ltp>=float(tr['sl']) or pct>=2.0 or pct<=-0.6:
-                state['closed'].append({**tr,"exit":float(ltp),"pnl":float(pct)}); trail_msg+=f"✅ CLOSED SELL {tr['symbol']} {pct:.2f}%\n"; continue
-        new_active.append(tr)
-    except: new_active.append(tr)
-state['active']=new_active
+active=state.get("active",[])
+pending=state.get("pending",[])
 
 gainers, losers = get_top_movers()
-buys=[]; sells=[]
-for sym in gainers:
-    r=analyze(sym,"BUY")
-    if r: buys.append(r)
-for sym in losers:
-    r=analyze(sym,"SELL")
-    if r: sells.append(r)
+all_syms = gainers + losers
 
-buys=sorted(buys,key=lambda x:x['rank'],reverse=True)
-sells=sorted(sells,key=lambda x:x['rank'],reverse=True)
-top_buys=buys[:3]; top_sells=sells[:3]
-all_new = top_buys + top_sells
+new_signals=[]
+for sym in all_syms:
+    token=TOKEN_MAP.get(sym)
+    if not token: continue
+    df=get_candles(obj, token)
+    res=analyze(df)
+    if res:
+        side, score, conds, ltp = res
+        # Duplicate Check
+        if any(x['symbol']==sym for x in active+pending): continue
+        item={"symbol":sym, "side":side, "score":score, "price":ltp, "conds":",".join(conds), "time":pd.Timestamp.now().strftime("%H:%M")}
+        if len(active)<2:
+            active.append(item); new_signals.append(item)
+        else:
+            if len(pending)<6: pending.append(item)
 
-for r in all_new:
-    if r['symbol'] not in [t['symbol'] for t in state['active']] and r['symbol'] not in [p['symbol'] for p in state['pending']] and r['symbol'] not in [c['symbol'] for c in state['closed']]:
-        state['pending'].append(r)
+save_state(active, pending)
 
-state['pending']=sorted(state['pending'],key=lambda x:x['rank'],reverse=True)
-can_take = 2 - len(state['active'])
-total_left = 6 - len(state['active']) - len(state['closed'])
-can_take = min(can_take, total_left)
-if can_take<0: can_take=0
-
-picked=[]
-for i in range(can_take):
-    if state['pending']:
-        r=state['pending'].pop(0)
-        state['active'].append({"symbol":str(r['symbol']),"type":str(r['type']),"entry":float(r['ltp']),"sl":float(r['sl']),"t1":float(r['t1']),"t2":float(r['t2']),"trailed":bool(False)})
-        picked.append(r)
-
-# FIX JSON DUMP - convert all
-def to_py(o):
-    if isinstance(o, (np.bool_, bool)): return bool(o)
-    if isinstance(o, (np.integer,)): return int(o)
-    if isinstance(o, (np.floating,)): return float(o)
-    return o
-
-with open(STATE_FILE,'w') as f: json.dump(state,f,default=to_py)
-
-msg=f"🎯 INTRADAY 6 TRADE | {ist_now.strftime('%d %b %H:%M')} IST | 5Min\nActive {len(state['active'])}/2 | Closed {len(state['closed'])}/6 | Pending {len(state['pending'])} | Scan {len(gainers)+len(losers)}\n"
-if trail_msg: msg+=f"\n{trail_msg}\n"
-if picked:
-    msg+=f"🔥 NEW {len(picked)} ACTIVE:\n"
-    for r in picked:
-        msg+=f"{r['tier']} {r['type']} {r['symbol']} {r['score']}/8 {r['pat']} {r['cond']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f}(1%) T2:{r['t2']:.1f}(2%)\n"
+# Telegram
+msg=f"⏰ {pd.Timestamp.now().strftime('%H:%M')} SCAN {len(all_syms)} | Active {len(active)}/2 Closed 0/6 Pending {len(pending)}\n"
+if new_signals:
+    msg+=f"🔥 NEW {len(new_signals)} ACTIVE:\n"
+    for s in new_signals:
+        msg+=f"{'🟢' if s['side']=='BUY' else '🔴'} {s['side']} {s['symbol']} {s['score']}/8 {s['conds']}\n"
 else:
-    msg+=f"No New - Active Full or No Setup - Next 5Min\n"
+    msg+="No New Signal - Conditions Not Match\n"
+msg+=f"ACTIVE: {', '.join([f'{a['side']} {a['symbol']}' for a in active])}\n"
+msg+=f"PENDING Q: {', '.join([f'{p['symbol']}' for p in pending[:3]])}"
 
-msg+=f"\n📈 Active:\n"
-for t in state['active']: msg+=f"{t['type']} {t['symbol']} E:{t['entry']:.1f} SL:{t['sl']:.1f}\n"
-if state['pending']:
-    msg+=f"\n⏳ Pending Queue (One Close->Next):\n"
-    for p in state['pending'][:4]: msg+=f"{p['type']} {p['symbol']} {p['score']}/8\n"
-
-print(msg); send_tg(msg)
+requests.get(f"https://api.telegram.org/bot{bot_token}/sendMessage?chat_id={chat_id}&text={msg}")
+print(msg)
