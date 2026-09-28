@@ -21,13 +21,11 @@ if not os.path.exists("scrip_master.json"):
 with open("scrip_master.json") as f: master=json.load(f)
 token_map={s['name']:s['token'] for s in master if s['exch_seg']=='NSE' and s['symbol'].endswith('-EQ')}
 
-# === TOP GAINER = BUY ONLY, TOP LOSER = SELL ONLY ===
 def get_nse_750_movers():
     headers={"User-Agent":"Mozilla/5.0"}
     s=requests.Session()
     try: s.get("https://www.nseindia.com",headers=headers,timeout=5)
     except: pass
-    
     gainers=[]; losers=[]
     for idx in ["NIFTY 100","NIFTY MIDCAP 150","NIFTY SMALLCAP 250"]:
         try:
@@ -36,17 +34,13 @@ def get_nse_750_movers():
             if 'data' in r:
                 data=[x for x in r['data'] if x.get('lastPrice',0)>50]
                 df=pd.DataFrame(data).sort_values('pChange', ascending=False)
-                # Large+Mid+Small मधून प्रत्येकी 7 Gainer + 7 Loser
-                gainers.extend(df.head(7)['symbol'].tolist())
-                losers.extend(df.tail(7)['symbol'].tolist())
+                gainers.extend(df.head(12)['symbol'].tolist())
+                losers.extend(df.tail(12)['symbol'].tolist())
         except: continue
-
     if len(gainers)<15:
-        gainers=["POLYCAB","DIXON","KAYNES","BSE","HAL","BEL","BHEL","PFC","RECLTD","RVNL","TATAPOWER","TATAMOTORS","JSWSTEEL","RELIANCE","MARUTI","TITAN","NTPC","POWERGRID","COALINDIA","M&M","KPITTECH"]
-        losers=["SUZLON","IDEA","YESBANK","IRFC","SAIL","NHPC","SJVN","NMDC","BANKBARODA","PNB","CANBK","IDFCFIRSTB","ZOMATO","IRCTC","IEX","CDSL","MCX","TATAELXSI","LTTS","COFORGE","PERSISTENT"]
-
-    print(f"GAINERS {len(gainers)}: {gainers[:5]} | LOSERS {len(losers)}: {losers[:5]}")
-    return gainers[:21], losers[:21] # Large7+Mid7+Small7 = 21+21 = 42
+        gainers=["POLYCAB","DIXON","KAYNES","BSE","HAL","BEL","BHEL","PFC","RVNL","TATAPOWER","TATAMOTORS","JSWSTEEL","RELIANCE","MARUTI","TITAN","NTPC"]
+        losers=["SUZLON","IDEA","YESBANK","IRFC","SAIL","NHPC","SJVN","BANKBARODA","PNB","CANBK","IDFCFIRSTB","IEX","CDSL","MCX","COFORGE","LTTS"]
+    return gainers[:36], losers[:36]
 
 def get_pat(df):
     if len(df)<4: return []
@@ -67,9 +61,9 @@ def analyze(sym, mode):
         fdate=(ist_now-timedelta(days=5)).strftime("%Y-%m-%d %H:%M"); tdate=ist_now.strftime("%Y-%m-%d %H:%M")
         data=smart.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIFTEEN_MINUTE","fromdate":fdate,"todate":tdate})['data']
         df=pd.DataFrame(data,columns=['Time','Open','High','Low','Close','Volume'])
-        if len(df)<30: return None
+        if len(df)<35: return None
         ltp=df['Close'].iloc[-1]
-        if ltp<50: return None
+        if ltp<50 or ltp>5000: return None # Penny आणि High Price Avoid
         df['EMA9']=df['Close'].ewm(9).mean(); df['EMA15']=df['Close'].ewm(15).mean()
         df['TP']=(df['High']+df['Low']+df['Close'])/3; df['VWAP']=(df['TP']*df['Volume']).cumsum()/df['Volume'].cumsum()
         delta=df['Close'].diff(); gain=delta.clip(lower=0).ewm(alpha=1/14).mean(); loss=(-delta.clip(upper=0)).ewm(alpha=1/14).mean()
@@ -79,21 +73,24 @@ def analyze(sym, mode):
         c=df.iloc[-1]; c3h=df['High'].iloc[-4:-1].max(); c3l=df['Low'].iloc[-4:-1].min(); vavg=df['Volume'].iloc[-11:-1].mean()
         pats=get_pat(df)
         
-        # === CONDITION MATCH ===
+        # Intraday Accuracy Filters
+        day_range = (df['High'].iloc[-26:].max() - df['Low'].iloc[-26:].min())
+        if day_range < ltp*0.02: return None # 2% पेक्षा कमी Range असेल तर No Trade
+
         if mode=="GAINER":
-            buy_score=sum([c['Close']>c3h, c['EMA9']>c['VWAP'], c['EMA15']>c['VWAP'], st<0, c['RSI']>50, df['MACD'].iloc[-1]>0, c['Volume']>vavg*0.9])
+            buy_score=sum([c['Close']>df['EMA9'].iloc[-1], c['EMA9']>c['VWAP'], st<0, c['RSI']>50 and c['RSI']<75, df['MACD'].iloc[-1]>0, c['Volume']>vavg*0.9, c['Close']>c['Open']])
             if buy_score>=5:
-                sl=min(c3l,ltp*0.985); r=ltp-sl
-                if r<ltp*0.003: return None
-                tier="STAR ⭐" if any(p in pats for p in ["HAMMER","BULL_ENGULF"]) else "GOOD"
-                return {"t":"BUY","s":sym,"sc":f"{buy_score}/7","p":"+ ".join(pats) if pats else "TOP GAINER 5/7","ltp":ltp,"sl":sl,"t1":ltp+r*2,"t2":ltp+r*4,"tier":tier}
-        else: # LOSER
-            sell_score=sum([c['Close']<c3l, c['EMA9']<c['VWAP'], c['EMA15']<c['VWAP'], st>0, c['RSI']<50, df['MACD'].iloc[-1]<0, c['Volume']>vavg*0.9])
+                sl=min(c3l, ltp*0.985); r=ltp-sl
+                if r<ltp*0.004 or r>ltp*0.02: return None
+                rank = buy_score + (2 if any(p in pats for p in ["HAMMER","BULL_ENGULF"]) else 0) + (1 if c['RSI']>55 else 0)
+                return {"t":"BUY","s":sym,"sc":f"{buy_score}/7","p":"+ ".join(pats) if pats else "INTRADAY MOM","ltp":ltp,"sl":sl,"t1":ltp+r*1.5,"t2":ltp+r*3,"rank":rank,"tier":"STAR ⭐" if rank>=7 else "GOOD"}
+        else:
+            sell_score=sum([c['Close']<df['EMA9'].iloc[-1], c['EMA9']<c['VWAP'], st>0, c['RSI']<50 and c['RSI']>25, df['MACD'].iloc[-1]<0, c['Volume']>vavg*0.9, c['Close']<c['Open']])
             if sell_score>=5:
-                sl=max(c3h,ltp*1.015); r=sl-ltp
-                if r<ltp*0.003: return None
-                tier="STAR ⭐" if any(p in pats for p in ["INV_HAMMER","BEAR_ENGULF"]) else "GOOD"
-                return {"t":"SELL","s":sym,"sc":f"{sell_score}/7","p":"+ ".join(pats) if pats else "TOP LOSER 5/7","ltp":ltp,"sl":sl,"t1":ltp-r*2,"t2":ltp-r*4,"tier":tier}
+                sl=max(c3h, ltp*1.015); r=sl-ltp
+                if r<ltp*0.004 or r>ltp*0.02: return None
+                rank = sell_score + (2 if any(p in pats for p in ["INV_HAMMER","BEAR_ENGULF"]) else 0) + (1 if c['RSI']<45 else 0)
+                return {"t":"SELL","s":sym,"sc":f"{sell_score}/7","p":"+ ".join(pats) if pats else "INTRADAY MOM","ltp":ltp,"sl":sl,"t1":ltp-r*1.5,"t2":ltp-r*3,"rank":rank,"tier":"STAR ⭐" if rank>=7 else "GOOD"}
     except: return None
 
 gainers_list, losers_list = get_nse_750_movers()
@@ -101,18 +98,23 @@ buys=[]; sells=[]
 
 for sym in gainers_list:
     res=analyze(sym, "GAINER")
-    if res and len(buys)<10: buys.append(res)
-
+    if res: buys.append(res)
 for sym in losers_list:
     res=analyze(sym, "LOSER")
-    if res and len(sells)<10: sells.append(res)
+    if res: sells.append(res)
 
-msg=f"🔥 LIVE MATCHED | {ist_now.strftime('%d %b %H:%M')} IST\nGainer=BUY Only | Loser=SELL Only\nLARGE7+MID7+SMALL7\n\nTOP GAINER BUY ({len(buys)}):\n"
-for r in buys: msg+=f"{r['tier']} {r['t']} {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
-if not buys: msg+="No BUY in Gainers Now\n"
+# === फक्त TOP 3 BEST Accurate Pick ===
+buys = sorted(buys, key=lambda x: x['rank'], reverse=True)[:3]
+sells = sorted(sells, key=lambda x: x['rank'], reverse=True)[:3]
 
-msg+=f"\nTOP LOSER SELL ({len(sells)}):\n"
-for r in sells: msg+=f"{r['tier']} {r['t']} {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
-if not sells: msg+="No SELL in Losers Now\n"
+msg=f"🎯 INTRADAY TOP 6 | {ist_now.strftime('%d %b %H:%M')} IST\nAccurate BUY 3 + SELL 3 Only\n\nBUY 3 ({len(buys)}):\n"
+for r in buys: msg+=f"{r['tier']} BUY {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
+if not buys: msg+="No Accurate BUY Now - Wait\n"
+
+msg+=f"\nSELL 3 ({len(sells)}):\n"
+for r in sells: msg+=f"{r['tier']} SELL {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
+if not sells: msg+="No Accurate SELL Now - Wait\n"
+
+msg+=f"\nLogic: VWAP+EMA9+ST+RSI 50-75+MACD+Vol | SL 1.5% T1 1:1.5 T2 1:3"
 
 print(msg); send_tg(msg)
