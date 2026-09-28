@@ -162,26 +162,33 @@ def fast_analyze(args):
         if ltp < orb_low * 0.999: sell+=2.0; sc.append(f"ORB-BD {((orb_low-ltp)/orb_low*100):.1f}%")
         if st_dir==1 and ltp>orb_high: buy+=1; bc.append("ST+ORB")
         if st_dir==-1 and ltp<orb_low: sell+=1; sc.append("ST+ORB")
+
+        # ===== v13 BULLISH FIX - Nifty DOWN मध्ये पण Bullish येईल =====
         if is_small_mid:
-            if day_gain_pct >= 0.6:
-                if day_gain_pct >= 1.0: buy+=2.5; bc.append(f"SM-DAY+ {day_gain_pct:.1f}%")
-                if last_5m_chg >= 0.15: buy+=1.2; bc.append(f"S-MOM {last_5m_chg:.1f}%")
+            nifty_down_bonus = 1.5 if nifty_trend=="DOWN" and day_gain_pct>0 else 0
+            if day_gain_pct >= 0.1:
+                if day_gain_pct >= 0.5: buy+=2.5; bc.append(f"SM-DAY+ {day_gain_pct:.1f}%")
+                else: buy+=1.0; bc.append(f"DAY+ {day_gain_pct:.1f}%")
+                if last_5m_chg >= 0.10: buy+=1.2; bc.append(f"S-MOM {last_5m_chg:.1f}%")
                 if ltp >= day_high*0.994: buy+=1.0; bc.append("NEAR-HIGH")
-                if recovery_pct >= 1.0: buy+=1.0; bc.append(f"RECOV {recovery_pct:.1f}%")
-            if day_gain_pct <= -0.6:
-                if day_gain_pct <= -1.0: sell+=2.5; sc.append(f"SM-DAY- {day_gain_pct:.1f}%")
-                if last_5m_chg <= -0.15: sell+=1.2; sc.append(f"S-DN {last_5m_chg:.1f}%")
-                if fall_from_high >= 1.0: sell+=1.0; sc.append(f"FALL {fall_from_high:.1f}%")
+                if recovery_pct >= 0.8: buy+=1.0; bc.append(f"RECOV {recovery_pct:.1f}%")
+                if nifty_down_bonus>0: buy+=nifty_down_bonus; bc.append(f"VS-NIFTY+{nifty_down_bonus}")
+            if day_gain_pct <= -0.2:
+                if day_gain_pct <= -0.5: sell+=2.5; sc.append(f"SM-DAY- {day_gain_pct:.1f}%")
+                else: sell+=1.0; sc.append(f"DAY- {day_gain_pct:.1f}%")
+                if last_5m_chg <= -0.10: sell+=1.2; sc.append(f"S-DN {last_5m_chg:.1f}%")
+                if fall_from_high >= 0.8: sell+=1.0; sc.append(f"FALL {fall_from_high:.1f}%")
+
         if cat=="SMALL":
             if buy>0: buy+=1.0; bc.append("S-BONUS")
             if sell>0: sell+=1.0; sc.append("S-BONUS")
         elif cat=="MID":
             if buy>0: buy+=0.7; bc.append("M-BONUS")
             if sell>0: sell+=0.7; sc.append("M-BONUS")
-        buy_thresh = 2.0 if is_small_mid else 3.5
-        sell_thresh = 1.6 if is_small_mid else 3.0
-        if buy>=buy_thresh and day_gain_pct < -1.0 and is_small_mid: return None
-        if sell>=sell_thresh and day_gain_pct > 1.0 and is_small_mid: return None
+
+        buy_thresh = 1.8 if is_small_mid else 3.5
+        sell_thresh = 1.4 if is_small_mid else 3.0
+
         if buy>=buy_thresh:
             sl=round(min(lows[-6:]),1)
             return {"sym":sym,"side":"BUY","score":buy,"cat":cat,"ltp":ltp,"sl":sl,"t1":round(ltp+atr_last*1.5,1),"t2":round(ltp+atr_last*3,1),"trail":round(ltp-atr_last*1.2,1),"conds":bc,"atr":atr_last,"recov":recovery_pct,"day_chg":day_gain_pct,"last_5m":last_5m_chg,"volx":volx}
@@ -261,74 +268,4 @@ while len(combined_active)<MAX_ACTIVE and (pending or final_trades):
     if pending: nxt=pending.pop(0)
     else:
         nxt=final_trades.pop(0)
-        nxt={"symbol":nxt["sym"],"side":nxt["side"],"cat":nxt["cat"],"price":nxt["ltp"],"sl":nxt["sl"],"t1":nxt["t1"],"t2":nxt["t2"],"trail_sl":nxt["sl"],"highest":nxt["ltp"],"lowest":nxt["ltp"],"atr":nxt["atr"],"time":today.strftime("%H:%M"),"score":nxt["score"]}
-    if not any(a["symbol"]==nxt["symbol"] for a in combined_active):
-        if today_count<DAILY_TARGET:
-            combined_active.append(nxt); today_count+=1
-        else: pending.append(nxt)
-
-for x in final_trades:
-    if len(pending)<6:
-        pending.append({"symbol":x["sym"],"side":x["side"],"cat":x["cat"],"price":x["ltp"],"sl":x["sl"],"t1":x["t1"],"t2":x["t2"],"trail_sl":x["sl"],"highest":x["ltp"],"lowest":x["ltp"],"atr":x["atr"],"time":today.strftime("%H:%M"),"score":x["score"]})
-
-combined_active=combined_active[:MAX_ACTIVE]
-save_state(combined_active,pending,today_count,today_str); save_pnl(pnl_hist)
-
-today_pnl=sum([p["pnl"] for p in pnl_hist if p["date"]==today_str]); total_pnl=sum([p["pnl"] for p in pnl_hist])
-win=len([p for p in pnl_hist if p["pnl"]>0]); loss=len([p for p in pnl_hist if p["pnl"]<0]); total_trades=len(pnl_hist)
-win_today=len([p for p in pnl_hist if p["date"]==today_str and p["pnl"]>0]); loss_today=len([p for p in pnl_hist if p["date"]==today_str and p["pnl"]<0])
-
-buy_res=[r for r in results if r["side"]=="BUY"]
-sell_res=[r for r in results if r["side"]=="SELL"]
-
-msg=f"⚡ v12 FINAL | SMALL+MID + 5m BO/BD + TARGET | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
-msg+=f"Scan 1000/1000 | Found {len(results)} (B:{len(buy_res)} S:{len(sell_res)}) | Daily {today_count}/{DAILY_TARGET}\n"
-msg+=f"L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])}\n"
-msg+="--------------------------------\n"
-
-if buy_res:
-    small_buy=[x for x in buy_res if x["cat"] in ["SMALL","MID"]]
-    if small_buy:
-        top_buy=sorted(small_buy, key=lambda x: x["day_chg"], reverse=True)[:5]
-        msg+=f"🔥 BULLISH S+M 5m-BO ({len(small_buy)}):\n"
-        for b in top_buy:
-            msg+=f"{b['sym']}({b['cat']}) P:{b['ltp']} Chg:{b['day_chg']:.1f}% | {','.join(b['conds'][:2])}\n"
-        msg+="--------------------------------\n"
-
-if sell_res:
-    small_sell=[x for x in sell_res if x["cat"] in ["SMALL","MID"]]
-    if small_sell:
-        top_sell=sorted(small_sell, key=lambda x: x["day_chg"])[:3]
-        msg+=f"🔻 BEARISH S+M 5m-BD ({len(small_sell)}):\n"
-        for b in top_sell:
-            msg+=f"{b['sym']}({b['cat']}) P:{b['ltp']} Chg:{b['day_chg']:.1f}% | {','.join(b['conds'][:2])}\n"
-        msg+="--------------------------------\n"
-
-burst=[r for r in results if "5m-BO" in str(r["conds"]) or "5m-BD" in str(r["conds"]) or "ORB-BO" in str(r["conds"])]
-if burst:
-    msg+=f"⚡ 5 MIN BO/BD:\n"
-    for m in sorted(burst, key=lambda x: x["last_5m"], reverse=True)[:4]:
-        msg+=f"{m['side']} {m['sym']}({m['cat']}) {','.join(m['conds'][:2])}\n"
-    msg+="--------------------------------\n"
-
-if closed:
-    msg+=f"📊 CLOSED ({len(closed)}):\n"
-    for c in closed: msg+=f"{c['side']} {c['symbol']} PnL:{c['pnl']}\n"
-    msg+="--------------------------------\n"
-
-msg+=f"🔄 ACTIVE ({len(combined_active)}/{MAX_ACTIVE}):\n"
-for a in combined_active:
-    sc = round(float(a.get('score',0)),1)
-    msg+=f"{a['side']} {a['symbol']}({a.get('cat','')}) E:{a['price']} LTP:{a.get('ltp','')}\n"
-    msg+=f" 🎯 T1:{a.get('t1')} T2:{a.get('t2')} SL:{a.get('trail_sl')} S:{sc}\n"
-msg+="--------------------------------\n"
-if pending:
-    msg+=f"⏳ PENDING ({len(pending)}):\n"
-    for p in pending[:3]:
-        msg+=f"{p['side']} {p['symbol']}({p['cat']}) E:{p['price']} T1:{p['t1']} T2:{p['t2']} SL:{p['sl']}\n"
-    msg+="--------------------------------\n"
-msg+=f"📈 TODAY: {today_pnl:.2f} | TOTAL: {total_pnl:.2f} | W:{win_today} L:{loss_today}\n"
-msg+=f"v12 CLEAN | Target ON | 5m-BO/BD | Thresh 2.0/1.6\n"
-
-send_tg(os.getenv("TELEGRAM_BOT_TOKEN","").strip(), os.getenv("TELEGRAM_CHAT_ID","").strip(), msg)
-print(msg) 
+        nxt={"symbol":nxt["sym"],"side":nxt["side"],"cat":nxt["cat
