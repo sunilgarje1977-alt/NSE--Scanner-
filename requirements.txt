@@ -6,3 +6,4 @@ numpy
 logzero
 python-dateutil
 websocket-client
+pytz
