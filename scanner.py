@@ -268,4 +268,62 @@ while len(combined_active)<MAX_ACTIVE and (pending or final_trades):
     if pending: nxt=pending.pop(0)
     else:
         nxt=final_trades.pop(0)
-        nxt={"symbol":nxt["sym"],"side":nxt["side"],"cat":nxt["cat
+        nxt={"symbol":nxt["sym"],"side":nxt["side"],"cat":nxt["cat"],"price":nxt["ltp"],"sl":nxt["sl"],"t1":nxt["t1"],"t2":nxt["t2"],"trail_sl":nxt["sl"],"highest":nxt["ltp"],"lowest":nxt["ltp"],"atr":nxt["atr"],"time":today.strftime("%H:%M"),"score":nxt["score"]}
+    if not any(a["symbol"]==nxt["symbol"] for a in combined_active):
+        if today_count<DAILY_TARGET:
+            combined_active.append(nxt); today_count+=1
+        else: pending.append(nxt)
+
+for x in final_trades:
+    if len(pending)<6:
+        pending.append({"symbol":x["sym"],"side":x["side"],"cat":x["cat"],"price":x["ltp"],"sl":x["sl"],"t1":x["t1"],"t2":x["t2"],"trail_sl":x["sl"],"highest":x["ltp"],"lowest":x["ltp"],"atr":x["atr"],"time":today.strftime("%H:%M"),"score":x["score"]})
+
+combined_active=combined_active[:MAX_ACTIVE]
+save_state(combined_active,pending,today_count,today_str); save_pnl(pnl_hist)
+
+today_pnl=sum([p["pnl"] for p in pnl_hist if p["date"]==today_str]); total_pnl=sum([p["pnl"] for p in pnl_hist])
+win_today=len([p for p in pnl_hist if p["date"]==today_str and p["pnl"]>0]); loss_today=len([p for p in pnl_hist if p["date"]==today_str and p["pnl"]<0])
+
+buy_res=[r for r in results if r["side"]=="BUY"]
+sell_res=[r for r in results if r["side"]=="SELL"]
+
+msg=f"⚡ v13 BULLISH FIX | SMALL+MID + 5m BO | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
+msg+=f"Scan 1000/1000 | Found {len(results)} (B:{len(buy_res)} S:{len(sell_res)}) | Daily {today_count}/{DAILY_TARGET}\n"
+msg+=f"L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])}\n"
+msg+="--------------------------------\n"
+
+if buy_res:
+    top_buy=sorted(buy_res, key=lambda x: x["day_chg"], reverse=True)[:6]
+    msg+=f"🔥 BULLISH ({len(buy_res)}):\n"
+    for b in top_buy:
+        msg+=f"{b['sym']}({b['cat']}) P:{b['ltp']} Chg:{b['day_chg']:.1f}% | {','.join(b['conds'][:2])}\n"
+    msg+="--------------------------------\n"
+
+if sell_res:
+    top_sell=sorted(sell_res, key=lambda x: x["day_chg"])[:4]
+    msg+=f"🔻 BEARISH ({len(sell_res)}):\n"
+    for b in top_sell:
+        msg+=f"{b['sym']}({b['cat']}) P:{b['ltp']} Chg:{b['day_chg']:.1f}% | {','.join(b['conds'][:2])}\n"
+    msg+="--------------------------------\n"
+
+if closed:
+    msg+=f"📊 CLOSED ({len(closed)}):\n"
+    for c in closed: msg+=f"{c['side']} {c['symbol']} PnL:{c['pnl']}\n"
+    msg+="--------------------------------\n"
+
+msg+=f"🔄 ACTIVE ({len(combined_active)}/{MAX_ACTIVE}):\n"
+for a in combined_active:
+    sc = round(float(a.get('score',0)),1)
+    msg+=f"{a['side']} {a['symbol']}({a.get('cat','')}) E:{a['price']} LTP:{a.get('ltp','')}\n"
+    msg+=f" 🎯 T1:{a.get('t1')} T2:{a.get('t2')} SL:{a.get('trail_sl')} S:{sc}\n"
+msg+="--------------------------------\n"
+if pending:
+    msg+=f"⏳ PENDING ({len(pending)}):\n"
+    for p in pending[:3]:
+        msg+=f"{p['side']} {p['symbol']}({p['cat']}) E:{p['price']} T1:{p['t1']} T2:{p['t2']} SL:{p['sl']}\n"
+    msg+="--------------------------------\n"
+msg+=f"📈 TODAY: {today_pnl:.2f} | TOTAL: {total_pnl:.2f} | W:{win_today} L:{loss_today}\n"
+msg+=f"v13: Bullish 0.1% | VS-NIFTY Bonus | T1/T2 ON | Thresh 1.8/1.4\n"
+
+send_tg(os.getenv("TELEGRAM_BOT_TOKEN","").strip(), os.getenv("TELEGRAM_CHAT_ID","").strip(), msg)
+print(msg)
