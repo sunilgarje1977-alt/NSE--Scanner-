@@ -172,6 +172,13 @@ def fast_analyze(args):
                 if ltp >= day_high*0.994: buy+=1.0; bc.append("NEAR-HIGH")
                 if recovery_pct >= 0.8: buy+=1.0; bc.append(f"RECOV {recovery_pct:.1f}%")
                 if nifty_down_bonus>0: buy+=nifty_down_bonus; bc.append(f"VS-NIFTY+{nifty_down_bonus}")
+            else:
+                # BOUNCE CASE - Day -1.5% ते 0% पण Recovery असेल तर Bullish
+                if last_5m_chg >= 0.5 and recovery_pct >= 1.0 and volx>=0.8:
+                    buy+=2.2; bc.append(f"BOUNCE {recovery_pct:.1f}%/{last_5m_chg:.1f}%")
+                if ltp >= day_low*1.012 and last_5m_chg >= 0.3:
+                    buy+=1.0; bc.append("LOW-BOUNCE")
+
             if day_gain_pct <= -0.2:
                 if day_gain_pct <= -0.5: sell+=2.5; sc.append(f"SM-DAY- {day_gain_pct:.1f}%")
                 else: sell+=1.0; sc.append(f"DAY- {day_gain_pct:.1f}%")
@@ -188,12 +195,17 @@ def fast_analyze(args):
         buy_thresh = 1.8 if is_small_mid else 3.5
         sell_thresh = 1.4 if is_small_mid else 3.0
 
-        # ===== v14 PERFECT FILTER =====
+        # ===== v15 PERFECT BOUNCE FILTER =====
         if is_small_mid:
-            if buy>=buy_thresh and day_gain_pct < 0.0:
-                return None
-            if sell>=sell_thresh and day_gain_pct > 0.6:
-                return None
+            if buy>=buy_thresh and day_gain_pct < -1.5:
+                # -1.5% पेक्षा जास्त पडला तरच Reject, पण Bounce असेल तर Allow
+                is_bounce = (last_5m_chg >= 0.5 and recovery_pct >= 1.0)
+                if not is_bounce:
+                    return None
+            if sell>=sell_thresh and day_gain_pct > 1.5:
+                is_drop = (last_5m_chg <= -0.5 and fall_from_high >= 1.0)
+                if not is_drop:
+                    return None
 
         if buy>=buy_thresh:
             sl=round(min(lows[-6:]),1)
@@ -293,7 +305,7 @@ win_today=len([p for p in pnl_hist if p["date"]==today_str and p["pnl"]>0]); los
 buy_res=[r for r in results if r["side"]=="BUY"]
 sell_res=[r for r in results if r["side"]=="SELL"]
 
-msg=f"⚡ v14 PERFECT | SMALL+MID + 5m BO + TARGET | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
+msg=f"⚡ v15 BOUNCE | SMALL+MID + 5m BO + TARGET | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
 msg+=f"Scan 1000/1000 | Found {len(results)} (B:{len(buy_res)} S:{len(sell_res)}) | Daily {today_count}/{DAILY_TARGET}\n"
 msg+=f"L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])}\n"
 msg+="--------------------------------\n"
@@ -302,7 +314,7 @@ if buy_res:
     top_buy=sorted(buy_res, key=lambda x: x["day_chg"], reverse=True)[:6]
     msg+=f"🔥 BULLISH ({len(buy_res)}):\n"
     for b in top_buy:
-        msg+=f"{b['sym']}({b['cat']}) P:{b['ltp']} Chg:{b['day_chg']:.1f}% | {','.join(b['conds'][:2])}\n"
+        msg+=f"{b['sym']}({b['cat']}) P:{b['ltp']} Chg:{b['day_chg']:.1f}% 5m:{b['last_5m']:.1f}% | {','.join(b['conds'][:2])}\n"
     msg+="--------------------------------\n"
 
 if sell_res:
@@ -329,7 +341,7 @@ if pending:
         msg+=f"{p['side']} {p['symbol']}({p['cat']}) E:{p['price']} T1:{p['t1']} T2:{p['t2']} SL:{p['sl']}\n"
     msg+="--------------------------------\n"
 msg+=f"📈 TODAY: {today_pnl:.2f} | TOTAL: {total_pnl:.2f} | W:{win_today} L:{loss_today}\n"
-msg+=f"v14: PERFECT FILTER | Bull Green Only | Bear Red Only | T1/T2\n"
+msg+=f"v15: BOUNCE ON | Day -1.5% + Recovery=BUY | Green Only + Bounce | T1/T2\n"
 
 send_tg(os.getenv("TELEGRAM_BOT_TOKEN","").strip(), os.getenv("TELEGRAM_CHAT_ID","").strip(), msg)
 print(msg)
