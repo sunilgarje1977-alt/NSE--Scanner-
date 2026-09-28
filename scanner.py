@@ -2,20 +2,17 @@ import requests, json, os, time, pyotp
 from SmartApi import SmartConnect
 import pandas as pd
 
-# FIX 1: On Time Signal साठी 70 Sec थांब - Candle Close नंतर
+# On Time साठी 70 Sec Wait
 print("Waiting 70 sec for Candle Close...")
 time.sleep(70)
 
-# --- CONFIG ---
 STATE_FILE = "active_trades.json"
-SCAN_MSG_FILE = "last_scan.json"
 
 def load_state():
     if not os.path.exists(STATE_FILE): return {"active":[], "pending":[]}
     try:
         with open(STATE_FILE,'r') as f:
             data=json.load(f)
-            # FIX: Bool Error - List नसेल तर empty कर
             if not isinstance(data.get("active"), list): data["active"]=[]
             if not isinstance(data.get("pending"), list): data["pending"]=[]
             return data
@@ -45,7 +42,6 @@ def get_top_movers():
     try: s.get("https://www.nseindia.com",headers=headers,timeout=5)
     except: pass
 
-    # FIX 2 & 3: Large + Mid + Smallcap कायम Scan - 9:25 + Midcap साठी
     permanent = ["NTPC","POWERGRID","ONGC","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BANKBARODA","PNB","CANBK","BEL","HAL","BHEL","TATAPOWER","TATASTEEL","JSWSTEEL","HINDALCO","LT","MARUTI","TITAN","ZOMATO","PAYTM","IRFC","RVNL","BSE","CDSL","MCX","KAYNES","DIXON","POLYCAB","COFORGE","PERSISTENT","PFC","RECLTD","SUZLON","IEX","TATAELXSI","IDEA","YESBANK","IDFCFIRSTB","SAIL","NHPC","COALINDIA","ADANIENT","ADANIPORTS"]
 
     gainers=list(permanent); losers=list(permanent)
@@ -57,19 +53,18 @@ def get_top_movers():
                 df=pd.DataFrame(r['data'])
                 df=df[df['lastPrice']>30]
                 df=df.sort_values('pChange',ascending=False)
-                # FIX: 15 नाही तर 30 - Mid Smallcap पण येईल!
                 gainers.extend(df.head(30)['symbol'].tolist())
                 losers.extend(df.tail(30)['symbol'].tolist())
         except: continue
 
     gainers=list(dict.fromkeys(gainers))[:50]
     losers=list(dict.fromkeys(losers))[:50]
-    print(f"SCAN LIST: Gainers {len(gainers)} Losers {len(losers)} Total {len(gainers)+len(losers)}")
+    print(f"SCAN LIST: Gainers {len(gainers)} Losers {len(losers)}")
     return gainers, losers
 
 def get_candles(obj, token):
     try:
-        param={"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":"2025-09-23 09:15","todate":"2025-09-28 15:30"}
+        param={"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":"2025-09-25 09:15","todate":"2025-09-28 15:30"}
         data=obj.getCandleData(param)
         if not data or 'data' not in data or not data['data']: return None
         df=pd.DataFrame(data['data'], columns=['ts','o','h','l','c','v'])
@@ -81,16 +76,13 @@ def analyze(df):
     df['ema9']=df['c'].ewm(span=9).mean()
     df['ema15']=df['c'].ewm(span=15).mean()
     df['vwap']=(df['c']*df['v']).cumsum()/df['v'].cumsum()
-    # RSI
     delta=df['c'].diff()
     gain=delta.where(delta>0,0).rolling(14).mean()
     loss=-delta.where(delta<0,0).rolling(14).mean()
     rs= gain/loss
     df['rsi']=100-(100/(1+rs))
-    # Supertrend simple (Close > EMA20)
     df['st_dir']= (df['c'] > df['c'].ewm(span=10).mean()).astype(int)
     df['st_dir']= df['st_dir'].apply(lambda x: 1 if x==1 else -1)
-    # MACD
     ema12=df['c'].ewm(span=12).mean()
     ema26=df['c'].ewm(span=26).mean()
     df['macd']=ema12-ema26
@@ -100,13 +92,12 @@ def analyze(df):
     last=df.iloc[-1]; prev=df.iloc[-2]
     ltp=last['c']; vol=last['v']; vavg=last['vol_avg']
 
-    # Conditions
     bull_engulf = last['c']>last['o'] and prev['c']<prev['o'] and last['c']>prev['o']
     bear_engulf = last['c']<last['o'] and prev['c']>prev['o'] and last['c']<prev['o']
     cross_up = prev['ema9']<prev['ema15'] and last['ema9']>last['ema15']
     cross_dn = prev['ema9']>prev['ema15'] and last['ema9']<last['ema15']
-    cbd3 = df['c'].iloc[-3:].is_monotonic_decreasing and len(df)>=3
-    cbu3 = df['c'].iloc[-3:].is_monotonic_increasing and len(df)>=3
+    cbd3 = df['c'].iloc[-3:].is_monotonic_decreasing
+    cbu3 = df['c'].iloc[-3:].is_monotonic_increasing
 
     buy_score=0; sell_score=0
     buy_cond=[]; sell_cond=[]
@@ -128,7 +119,6 @@ def analyze(df):
     if last['macd']>last['macd_sig']: buy_score+=1; buy_cond.append("MACD+")
     if last['macd']<last['macd_sig']: sell_score+=1; sell_cond.append("MACD-")
 
-    # FIX: Smallcap साठी Volume 0.5 - Midcap Signal साठी
     vol_need = vavg*0.5 if ltp<500 else vavg*0.7
     if vol>vol_need:
         buy_score+=0.5; sell_score+=0.5
@@ -138,7 +128,6 @@ def analyze(df):
     if sell_score>=5: return ("SELL", sell_score, sell_cond, ltp)
     return None
 
-# --- MAIN ---
 api_key=os.getenv("ANGEL_API_KEY")
 client_id=os.getenv("ANGEL_CLIENT_ID")
 pwd=os.getenv("ANGEL_PASSWORD")
@@ -165,7 +154,6 @@ for sym in all_syms:
     res=analyze(df)
     if res:
         side, score, conds, ltp = res
-        # Duplicate Check
         if any(x['symbol']==sym for x in active+pending): continue
         item={"symbol":sym, "side":side, "score":score, "price":ltp, "conds":",".join(conds), "time":pd.Timestamp.now().strftime("%H:%M")}
         if len(active)<2:
@@ -175,16 +163,21 @@ for sym in all_syms:
 
 save_state(active, pending)
 
-# Telegram
-msg=f"⏰ {pd.Timestamp.now().strftime('%H:%M')} SCAN {len(all_syms)} | Active {len(active)}/2 Closed 0/6 Pending {len(pending)}\n"
+# FIXED: f-string Error काढला - आता 100% चालेल
+active_str = ", ".join([str(a["side"]) + " " + str(a["symbol"]) for a in active])
+pending_str = ", ".join([str(p["symbol"]) for p in pending[:3]])
+new_str = ""
+for s in new_signals:
+    emoji = "BUY" if s["side"]=="BUY" else "SELL"
+    new_str += f"{emoji} {s['symbol']} {s['score']}/8 {s['conds']}\n"
+
+now_time = pd.Timestamp.now().strftime("%H:%M")
+msg = f"{now_time} SCAN {len(all_syms)} | Active {len(active)}/2 Pending {len(pending)}\n"
 if new_signals:
-    msg+=f"🔥 NEW {len(new_signals)} ACTIVE:\n"
-    for s in new_signals:
-        msg+=f"{'🟢' if s['side']=='BUY' else '🔴'} {s['side']} {s['symbol']} {s['score']}/8 {s['conds']}\n"
+    msg += f"NEW {len(new_signals)} ACTIVE:\n{new_str}\n"
 else:
-    msg+="No New Signal - Conditions Not Match\n"
-msg+=f"ACTIVE: {', '.join([f'{a['side']} {a['symbol']}' for a in active])}\n"
-msg+=f"PENDING Q: {', '.join([f'{p['symbol']}' for p in pending[:3]])}"
+    msg += "No New Signal\n"
+msg += f"ACTIVE: {active_str}\nPENDING: {pending_str}"
 
 requests.get(f"https://api.telegram.org/bot{bot_token}/sendMessage?chat_id={chat_id}&text={msg}")
 print(msg)
