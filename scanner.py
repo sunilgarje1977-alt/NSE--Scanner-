@@ -26,8 +26,13 @@ def save_pnl(data):
 
 def send_telegram(bot_token, chat_id, msg):
     try:
-        requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", data={"chat_id":chat_id,"text":msg}, timeout=15)
-    except: pass
+        if not bot_token or not chat_id:
+            print("TELEGRAM SECRET MISSING")
+            return
+        r=requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", data={"chat_id":chat_id,"text":msg}, timeout=15)
+        print(f"Telegram Status: {r.status_code}")
+    except Exception as e:
+        print(f"Telegram Error: {e}")
 
 def get_token_map():
     try:
@@ -40,32 +45,18 @@ def get_token_map():
 TOKEN_MAP=get_token_map()
 
 def get_1000_with_category():
-    LARGE = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","ASIANPAINT","MARUTI","TITAN","SUNPHARMA","ULTRACEMCO","NTPC","POWERGRID","ONGC","ADANIENT","ADANIPORTS","JSWSTEEL","TATASTEEL","HINDALCO","COALINDIA","BEL","HAL","BSE","MCX","TATAPOWER","TATAMOTORS","WIPRO","TECHM","HCLTECH"]
-    MID = ["BANKBARODA","PNB","CANBK","IDFCFIRSTB","BANDHANBNK","AUBANK","FEDERALBNK","CUB","RBLBANK","PFC","RECLTD","IREDA","RVNL","IRFC","IRCTC","BEML","BHEL","CONCOR","NHPC","SJVN","NMDC","SAIL","HINDZINC","VEDL","JINDALSTEL","JSWENERGY","COFORGE","PERSISTENT","MPHASIS","KPITTECH","DIXON","KAYNES","POLYCAB","KEI","LTIM","BSOFT","MUTHOOTFIN","CHOLAFIN","PNBHOUSING"]
-    SMALL = ["ZOMATO","PAYTM","NYKAA","DELHIVERY","IDEA","YESBANK","SUZLON","IEX","CDSL","ANGELONE","AFFLE","AARTIIND","TEJASNET","HFCL","RAILTEL","IRCON","MAZAGON","GARDENREACH","COCHINSHIP","PRAJIND","JPOWER","TATACHEM","CHAMBLFERT","DEEPAKNTR","ATUL","TANLA","EASEMYTRIP","UCOBANK","IOB","MAHABANK","UNIONBANK","CENTRALBK","MOTILALOFS","CAMS","KFINTECH"]
+    # FAST - NO NSE API - DIRECT 600 LIST
+    LARGE = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","ASIANPAINT","MARUTI","TITAN","SUNPHARMA","ULTRACEMCO","NTPC","POWERGRID","ONGC","ADANIENT","ADANIPORTS","JSWSTEEL","TATASTEEL","HINDALCO","COALINDIA","BEL","HAL","BSE","MCX","TATAPOWER","TATAMOTORS","WIPRO","TECHM","HCLTECH","GRASIM","CIPLA","DIVISLAB","DRREDDY","BRITANNIA","EICHERMOT","HEROMOTOCO","M&M","BAJAJ-AUTO","INDUSINDBK","SBILIFE","HDFCLIFE","ICICIPRULI","PFC","RECLTD","IREDA","RVNL","IRFC","IRCTC","HAL","BEML","BHEL","CONCOR","NHPC","SJVN","NMDC","SAIL","HINDZINC","VEDL","JSWENERGY","TATAELXSI","LTIM","LICI","GAIL","PETRONET","ADANIGREEN","ADANIPOWER"]
 
-    headers={"User-Agent":"Mozilla/5.0"}
-    s=requests.Session()
-    try: s.get("https://www.nseindia.com",headers=headers,timeout=8)
-    except: pass
-    all_syms=list(LARGE+MID+SMALL)
+    MID = ["BANKBARODA","PNB","CANBK","IDFCFIRSTB","BANDHANBNK","AUBANK","FEDERALBNK","CUB","RBLBANK","IDFC","PNBHOUSING","MUTHOOTFIN","CHOLAFIN","M&MFIN","SUNDARMFIN","POONAWALLA","CREDITACC","UJJIVAN","COFORGE","PERSISTENT","MPHASIS","KPITTECH","DIXON","KAYNES","POLYCAB","KEI","BSOFT","APOLLOHOSP","MAXHEALTH","FORTIS","AUROPHARMA","LUPIN","ALKEM","GODREJPROP","OBEROIRLTY","PRESTIGE","DLF","PIDILITIND","SRF","ATUL","AARTIIND","DEEPAKNTR","VINATIORG","TATACHEM","CHAMBLFERT","COROMANDEL","GNFC","NATIONALUM","JINDALSTEL","APLAPOLLO","WELCORP","TATACOMM","TATAPOWER"]
+
+    SMALL = ["ZOMATO","PAYTM","NYKAA","DELHIVERY","IDEA","YESBANK","SUZLON","IEX","CDSL","ANGELONE","AFFLE","AARTIIND","TEJASNET","HFCL","RAILTEL","IRCON","MAZAGON","GARDENREACH","COCHINSHIP","PRAJIND","JPOWER","TATACHEM","CHAMBLFERT","DEEPAKNTR","ATUL","TANLA","EASEMYTRIP","UCOBANK","IOB","MAHABANK","UNIONBANK","CENTRALBK","MOTILALOFS","CAMS","KFINTECH","RENUKA","BALRAMCHIN","TATAINVEST","VBL","JWL","TITAGARH","BDL","GRSE","HUDCO","NBCC","SJVN","IRCON","HFCL","TANLA","AFFLE","PRAJIND","TRIVENI","STERLITE","LATENTVIEW","ZENSAR","HAPPSTMNDS","ROUTE","INDIAMART","JUSTDIAL","NAZARA","POLICYBZR","CARTRADE","RATEGAIN","CAMPUS","BATAINDIA","RELAXO","KALYANKJIL","SENCO","KNRCON","PNCINFRA","HGINFRA","ASHOKA","JWL","TITAGARH","BEML","BDL","MAZAGON","COCHINSHIP","BSE","MCX","IEX","CDSL","CAMS"]
+
+    all_syms = list(dict.fromkeys(LARGE+MID+SMALL))[:600]
     cat_map={k:"LARGE" for k in LARGE}
     cat_map.update({k:"MID" for k in MID})
     cat_map.update({k:"SMALL" for k in SMALL})
-
-    for idx,cat in [("NIFTY 100","LARGE"),("NIFTY MIDCAP 150","MID"),("NIFTY SMALLCAP 250","SMALL"),("NIFTY MICROCAP 250","SMALL")]:
-        try:
-            url=f"https://www.nseindia.com/api/equity-stockIndices?index={idx.replace(' ','%20')}"
-            r=s.get(url,headers=headers,timeout=10).json()
-            if 'data' in r:
-                for d in r['data']:
-                    sym=d['symbol']
-                    if sym not in all_syms and d['lastPrice']>20:
-                        all_syms.append(sym)
-                        if sym not in cat_map: cat_map[sym]=cat
-        except: pass
-
-    all_syms=list(dict.fromkeys(all_syms))[:1000]
+    print(f"FAST LIST: {len(all_syms)} Stocks")
     return all_syms, cat_map
 
 def analyze(args):
@@ -106,7 +97,6 @@ def analyze(args):
 
         cat=cat_map.get(sym,"SMALL")
         thresh = 4
-
         if buy>=thresh:
             sl=round(min(df['l'].tail(5).min(), ltp-atr*1.2),1)
             return {"sym":sym,"side":"BUY","score":buy,"cat":cat,"ltp":ltp,"sl":sl,"t1":round(ltp+atr*1.5,1),"t2":round(ltp+atr*3,1),"conds":bc}
@@ -127,14 +117,14 @@ obj=SmartConnect(api_key=api_key)
 obj.generateSession(client_id,pwd,pyotp.TOTP(totp_secret).now())
 
 today=datetime.now()
-from_d=(today-timedelta(days=5)).strftime("%Y-%m-%d 09:15")
+from_d=(today-timedelta(days=2)).strftime("%Y-%m-%d 09:15")
 to_d=today.strftime("%Y-%m-%d 15:30")
 
 all_syms, cat_map = get_1000_with_category()
 state=load_state()
 
 results=[]
-with concurrent.futures.ThreadPoolExecutor(max_workers=25) as ex:
+with concurrent.futures.ThreadPoolExecutor(max_workers=50) as ex:
     futs=[ex.submit(analyze,(s,obj,from_d,to_d,cat_map)) for s in all_syms]
     for f in concurrent.futures.as_completed(futs):
         r=f.result()
@@ -144,4 +134,43 @@ def get_top(cat, side):
     filt=[x for x in results if x['cat']==cat and x['side']==side]
     return sorted(filt, key=lambda x: x['score'], reverse=True)[0] if filt else None
 
-large_buy=get_top 
+large_buy=get_top("LARGE","BUY")
+large_sell=get_top("LARGE","SELL")
+mid_buy=get_top("MID","BUY")
+mid_sell=get_top("MID","SELL")
+small_buy=get_top("SMALL","BUY")
+small_sell=get_top("SMALL","SELL")
+
+final_6 = [x for x in [large_buy, large_sell, mid_buy, mid_sell, small_buy, small_sell] if x]
+
+pnl_history=load_pnl()
+today_str=today.strftime("%Y-%m-%d")
+active_prev=state.get("active",[])
+active_now=[]
+for a in active_prev:
+    live = next((r for r in results if r['sym']==a.get('symbol')), None)
+    if live:
+        entry=a.get('price', live['ltp'])
+        ltp_now=live['ltp']
+        side=a.get('side','BUY')
+        if side=='BUY': pnl = ltp_now - entry
+        else: pnl = entry - ltp_now
+        hit=""
+        if side=='BUY':
+            if ltp_now <= live['sl']: hit="SL HIT"
+            elif ltp_now >= live['t1']: hit="T1 HIT"
+        else:
+            if ltp_now >= live['sl']: hit="SL HIT"
+            elif ltp_now <= live['t1']: hit="T1 HIT"
+        if hit:
+            pnl_history.append({"date":today_str,"symbol":a.get('symbol'),"side":side,"entry":entry,"exit":ltp_now,"pnl":round(pnl,1),"result":hit,"time":today.strftime("%H:%M")})
+        else:
+            active_now.append(a)
+    else:
+        active_now.append(a)
+
+save_pnl(pnl_history)
+
+new_active=[]
+for x in final_6[:2]:
+    new_active.append({"symbol":x['sym'],"side":x['side'],"cat":x['cat'],"price":x['ltp'],"sl":x['sl'],"t1":x['t1'],"t2":x['t
