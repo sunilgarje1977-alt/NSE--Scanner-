@@ -1,199 +1,121 @@
-
-import requests, json, os, pyotp, concurrent.futures
+import os, json, pyotp, urllib.request, pandas as pd, requests
+from datetime import datetime, timedelta, timezone
 from SmartApi import SmartConnect
-import pandas as pd
-from datetime import datetime, timedelta
 
-STATE_FILE = "active_trades.json"
+def clean(k): return os.getenv(k,"").strip().strip('"').strip("'")
+API_KEY=clean('ANGEL_API_KEY'); CLIENT_ID=clean('ANGEL_CLIENT_ID'); PWD=clean('ANGEL_PASSWORD'); TOTP_SECRET=clean('ANGEL_TOTP_SECRET')
+TELE_TOKEN=clean('TELEGRAM_BOT_TOKEN'); TELE_CHAT=clean('TELEGRAM_CHAT_ID')
 
-def load_state():
-    if not os.path.exists(STATE_FILE): return {"active":[], "pending":[]}
-    try:
-        with open(STATE_FILE,'r') as f: return json.load(f)
-    except: return {"active":[], "pending":[]}
+smart=SmartConnect(api_key=API_KEY)
+smart.generateSession(CLIENT_ID,PWD,pyotp.TOTP(TOTP_SECRET).now())
 
-def save_state(active, pending):
-    with open(STATE_FILE,'w') as f: json.dump({"active":active,"pending":pending}, f)
-
-def send_telegram(bot_token, chat_id, msg):
-    try:
-        requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", data={"chat_id":chat_id,"text":msg}, timeout=15)
+def send_tg(msg):
+    try: requests.get(f"https://api.telegram.org/bot{TELE_TOKEN}/sendMessage", params={"chat_id":TELE_CHAT,"text":msg}, timeout=15)
     except: pass
 
-def get_token_map():
-    try:
-        url="https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-        data=requests.get(url,timeout=20).json()
-        mp={i['symbol'].replace('-EQ',''):i['token'] for i in data if i.get('exch_seg')=='NSE' and i.get('symbol')}
-        return mp
-    except: return {}
+IST = timezone(timedelta(hours=5, minutes=30))
+ist_now = datetime.now(IST)
 
-TOKEN_MAP=get_token_map()
+if not os.path.exists("scrip_master.json"):
+    urllib.request.urlretrieve("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json","scrip_master.json")
+with open("scrip_master.json") as f: master=json.load(f)
+token_map={s['name']:s['token'] for s in master if s['exch_seg']=='NSE' and s['symbol'].endswith('-EQ')}
 
-# MID + SMALL चे Permanent List - NSE API Fail झाला तरी येईल
-MID_PERM = ["BANKBARODA","PNB","CANBK","IDFCFIRSTB","BANDHANBNK","AUBANK","FEDERALBNK","CUB","KARURVYSYA","RBLBANK","PNBHOUSING","MUTHOOTFIN","MANAPPURAM","CHOLAFIN","PFC","RECLTD","IREDA","RVNL","IRFC","IRCTC","BEML","BEL","HAL","BDL","BHEL","CONCOR","NHPC","SJVN","COALINDIA","NMDC","SAIL","HINDZINC","VEDL","JINDALSTEL","JSWENERGY","TATAPOWER","TATAELXSI","COFORGE","PERSISTENT","MPHASIS","KPITTECH","TATAELXSI","DIXON","KAYNES","AMBER","POLYCAB","KEI","LTIM","BSOFT"]
-SMALL_PERM = ["ZOMATO","PAYTM","NYKAA","DELHIVERY","IDEA","YESBANK","SUZLON","IEX","CDSL","BSE","MCX","ANGELONE","MOTILALOFS","CAMS","KFINTECH","KPITTECH","TEJASNET","HFCL","STERLITE","RAILTEL","IRCON","MAZAGON","GARDENREACH","COCHINSHIP","PRAJIND","TRIVENI","JPOWER","RENUKA","BALRAMCHIN","TATACHEM","CHAMBLFERT","DEEPAKNTR","AARTIIND","ATUL","VINATIORG","NAVINCORP","TANLA","AFFLE","LATENTVIEW","EASEMYTRIP","CENTRALBK","UCOBANK","IOB","MAHABANK","UNIONBANK"]
-
-def get_1000_with_category():
-    headers={"User-Agent":"Mozilla/5.0"}
+# === LIVE MONDAY NSE 750 ===
+def get_nse_750_movers():
+    headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"}
     s=requests.Session()
-    try: s.get("https://www.nseindia.com",headers=headers,timeout=10)
+    try: s.get("https://www.nseindia.com",headers=headers,timeout=5)
     except: pass
-
-    all_syms=[]
-    cat_map={}
-
-    # LARGE
-    for idx in ["NIFTY 100","NIFTY 500"]:
+    all_stocks=[]
+    for idx in ["NIFTY 100","NIFTY MIDCAP 150","NIFTY SMALLCAP 250"]:
         try:
             url=f"https://www.nseindia.com/api/equity-stockIndices?index={idx.replace(' ','%20')}"
-            r=s.get(url,headers=headers,timeout=15).json()
+            r=s.get(url,headers=headers,timeout=10).json()
             if 'data' in r:
-                for d in r['data']:
-                    sym=d['symbol']
-                    if sym not in all_syms and d['lastPrice']>20:
-                        all_syms.append(sym)
-                        if sym not in cat_map: cat_map[sym]="LARGE"
-        except: pass
+                for it in r['data']:
+                    if it.get('lastPrice',0)>50:
+                        all_stocks.append({'symbol':it['symbol'],'pChange':it.get('pChange',0),'lastPrice':it.get('lastPrice',0)})
+            print(f"{idx} -> {len(r.get('data',[]))}")
+        except Exception as e:
+            print(f"{idx} Fail {e}")
 
-    # MID - Permanent + NSE
+    if len(all_stocks)<60:
+        print("API Fail -> Using LIVE Monday Mix 750")
+        # Large + Mid + Small Mix - आज Live साठी
+        return ["RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","SBIN","BHARTIARTL","ITC","LT","MARUTI","TITAN","SUNPHARMA","NTPC","POWERGRID","ONGC","COALINDIA","TATAMOTORS","M&M","JSWSTEEL","TATASTEEL","HAL","BEL","BDL","MAZDOCK","RVNL","IRFC","PFC","RECLTD","BHEL","SAIL","NHPC","SJVN","NMDC","CONCOR","BANKBARODA","PNB","CANBK","IDFCFIRSTB","FEDERALBNK","ASHOKLEY","MOTHERSON","TATAPOWER","ADANIPOWER","IRCTC","ZOMATO","POLYCAB","DIXON","KPITTECH","PERSISTENT","COFORGE","LTTS","TATAELXSI","KAYNES","BSE","CDSL","IEX","MCX","SUZLON","IDEA","YESBANK"]
+
+    df=pd.DataFrame(all_stocks).drop_duplicates('symbol')
+    df=df.sort_values('pChange',ascending=False)
+    gainers=df.head(30)['symbol'].tolist()
+    losers=df.tail(30)['symbol'].tolist()
+    print(f"LIVE 750 -> Gainers {gainers[:5]} Losers {losers[:5]} Total {len(gainers+losers)}")
+    return gainers + losers
+
+def get_pat(df):
+    if len(df)<4: return []
+    c2=df.iloc[-2]; c=df.iloc[-1]
+    pats=[]; body=abs(c['Close']-c['Open'])+0.1
+    low=min(c['Open'],c['Close'])-c['Low']; up=c['High']-max(c['Open'],c['Close'])
+    if low>body*1.8: pats.append("HAMMER")
+    if up>body*1.8: pats.append("INV_HAMMER")
+    if c2['Close']<c2['Open'] and c['Close']>c['Open'] and c['Close']>c2['Open']: pats.append("BULL_ENGULF")
+    if c2['Close']>c2['Open'] and c['Close']<c['Open'] and c['Close']<c2['Open']: pats.append("BEAR_ENGULF")
+    return pats
+
+def analyze(sym):
     try:
-        url="https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20MIDCAP%20150"
-        r=s.get(url,headers=headers,timeout=15).json()
-        if 'data' in r:
-            for d in r['data']:
-                sym=d['symbol']
-                if sym not in all_syms:
-                    all_syms.append(sym)
-                    cat_map[sym]="MID"
-    except: pass
-    for sym in MID_PERM:
-        if sym not in all_syms: all_syms.append(sym)
-        if sym not in cat_map: cat_map[sym]="MID"
-
-    # SMALL - Permanent + NSE
-    try:
-        for idx in ["NIFTY SMALLCAP 250","NIFTY MICROCAP 250"]:
-            url=f"https://www.nseindia.com/api/equity-stockIndices?index={idx.replace(' ','%20')}"
-            r=s.get(url,headers=headers,timeout=15).json()
-            if 'data' in r:
-                for d in r['data']:
-                    sym=d['symbol']
-                    if sym not in all_syms and d['lastPrice']>20:
-                        all_syms.append(sym)
-                        if sym not in cat_map: cat_map[sym]="SMALL"
-    except: pass
-    for sym in SMALL_PERM:
-        if sym not in all_syms: all_syms.append(sym)
-        if sym not in cat_map: cat_map[sym]="SMALL"
-
-    # Balance: 200 Large + 200 Mid + 600 Small = 1000
-    all_syms=list(dict.fromkeys(all_syms))[:1000]
-    large_n = len([k for k,v in cat_map.items() if v=="LARGE"])
-    mid_n = len([k for k,v in cat_map.items() if v=="MID"])
-    small_n = len([k for k,v in cat_map.items() if v=="SMALL"])
-    print(f"1000 LIST FINAL: {len(all_syms)} | LARGE {large_n} | MID {mid_n} | SMALL {small_n}")
-    return all_syms, cat_map
-
-def analyze(args):
-    sym, obj, from_d, to_d, cat_map = args
-    token=TOKEN_MAP.get(sym)
-    if not token: return None
-    try:
-        data=obj.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":from_d,"todate":to_d})
-        if not data or 'data' not in data or not data['data']: return None
-        df=pd.DataFrame(data['data'], columns=['ts','o','h','l','c','v'])
-        if len(df)<25: return None
-        df['ema9']=df['c'].ewm(span=9).mean()
-        df['ema15']=df['c'].ewm(span=15).mean()
-        df['vwap']=(df['c']*df['v']).cumsum()/df['v'].cumsum()
-        delta=df['c'].diff()
-        df['rsi']=100-(100/(1+(delta.where(delta>0,0).rolling(14).mean() / -delta.where(delta<0,0).rolling(14).mean())))
-        df['macd']=df['c'].ewm(span=12).mean()-df['c'].ewm(span=26).mean()
-        df['macd_sig']=df['macd'].ewm(span=9).mean()
-        df['vol_avg']=df['v'].rolling(20).mean()
-        df['atr']=(df['h']-df['l']).rolling(14).mean()
-        last=df.iloc[-1]; prev=df.iloc[-2]
-        ltp=last['c']; atr=last['atr'] if pd.notna(last['atr']) else ltp*0.007
-
-        buy=0; sell=0; bc=[]; sc=[]
-        if last['c']>last['o'] and prev['c']<prev['o']: buy+=1; bc.append("ENGULF")
-        if last['c']<last['o'] and prev['c']>prev['o']: sell+=1; sc.append("ENGULF")
-        if prev['ema9']<prev['ema15'] and last['ema9']>last['ema15']: buy+=1; bc.append("9x15UP")
-        if prev['ema9']>prev['ema15'] and last['ema9']<last['ema15']: sell+=1; sc.append("9x15DN")
-        if df['c'].iloc[-3:].is_monotonic_increasing: buy+=1; bc.append("3CBU")
-        if df['c'].iloc[-3:].is_monotonic_decreasing: sell+=1; sc.append("3CBD")
-        if last['ema9']>last['vwap']: buy+=1; bc.append("E9>V")
-        if last['ema9']<last['vwap']: sell+=1; sc.append("E9<V")
-        if last['rsi']>50: buy+=1; bc.append(f"RSI{int(last['rsi'])}")
-        if last['rsi']<50: sell+=1; sc.append(f"RSI{int(last['rsi'])}")
-        if last['macd']>last['macd_sig']: buy+=1; bc.append("MACD+")
-        if last['macd']<last['macd_sig']: sell+=1; sc.append("MACD-")
-        if last['v']>last['vol_avg']*0.5: buy+=0.5; sell+=0.5; bc.append("VOL"); sc.append("VOL")
-
-        cat=cat_map.get(sym,"SMALL")
-        # MID/SMALL साठी Threshold कमी - 3.5
-        thresh = 5 if cat=="LARGE" else 3.5
-
-        if buy>=thresh:
-            sl=round(min(df['l'].tail(5).min(), ltp-atr*1.2),1)
-            return {"sym":sym,"side":"BUY","score":buy,"cat":cat,"ltp":ltp,"sl":round(sl,1),"t1":round(ltp+atr*1.5,1),"t2":round(ltp+atr*3,1),"conds":bc}
-        if sell>=thresh:
-            sl=round(max(df['h'].tail(5).max(), ltp+atr*1.2),1)
-            return {"sym":sym,"side":"SELL","score":sell,"cat":cat,"ltp":ltp,"sl":round(sl,1),"t1":round(ltp-atr*1.5,1),"t2":round(ltp-atr*3,1),"conds":sc}
+        token=token_map.get(sym)
+        if not token: return None
+        fdate=(ist_now-timedelta(days=5)).strftime("%Y-%m-%d %H:%M"); tdate=ist_now.strftime("%Y-%m-%d %H:%M")
+        data=smart.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIFTEEN_MINUTE","fromdate":fdate,"todate":tdate})['data']
+        df=pd.DataFrame(data,columns=['Time','Open','High','Low','Close','Volume'])
+        if len(df)<35: return None
+        ltp=df['Close'].iloc[-1]
+        if ltp<50: return None
+        df['EMA9']=df['Close'].ewm(9).mean(); df['EMA15']=df['Close'].ewm(15).mean()
+        df['TP']=(df['High']+df['Low']+df['Close'])/3; df['VWAP']=(df['TP']*df['Volume']).cumsum()/df['Volume'].cumsum()
+        delta=df['Close'].diff(); gain=delta.clip(lower=0).ewm(alpha=1/14).mean(); loss=(-delta.clip(upper=0)).ewm(alpha=1/14).mean()
+        df['RSI']=100-(100/(1+gain/loss)); df['MACD']=df['Close'].ewm(12).mean()-df['Close'].ewm(26).mean()
+        hl2=(df['High']+df['Low'])/2; tr=pd.concat([df['High']-df['Low'],(df['High']-df['Close'].shift()).abs(),(df['Low']-df['Close'].shift()).abs()],axis=1).max(axis=1)
+        atr=tr.rolling(10).mean(); up=hl2+3*atr; st=-1 if df['Close'].iloc[-1]>up.iloc[-2] else 1
+        c=df.iloc[-1]; c3h=df['High'].iloc[-4:-1].max(); c3l=df['Low'].iloc[-4:-1].min(); vavg=df['Volume'].iloc[-11:-1].mean()
+        pats=get_pat(df)
+        buy_pat=any(p in pats for p in ["HAMMER","BULL_ENGULF"]); sell_pat=any(p in pats for p in ["INV_HAMMER","BEAR_ENGULF"])
+        buy_score=sum([c['Close']>c3h, c['EMA9']>c['VWAP'], c['EMA15']>c['VWAP'], st<0, c['RSI']>55, df['MACD'].iloc[-1]>0, c['Volume']>vavg])
+        sell_score=sum([c['Close']<c3l, c['EMA9']<c['VWAP'], c['EMA15']<c['VWAP'], st>0, c['RSI']<45, df['MACD'].iloc[-1]<0, c['Volume']>vavg])
+        if buy_pat and buy_score>=5:
+            sl=min(c3l,ltp*0.985); r=ltp-sl; 
+            if r<ltp*0.004: return None
+            return {"t":"BUY","s":sym,"sc":f"{buy_score+1}/8","p":"+ ".join(pats),"ltp":ltp,"sl":sl,"t1":ltp+r*2,"t2":ltp+r*4,"tier":"STAR ⭐"}
+        if buy_score>=6:
+            sl=min(c3l,ltp*0.985); r=ltp-sl;
+            if r<ltp*0.004: return None
+            return {"t":"BUY","s":sym,"sc":f"{buy_score}/7","p":"7/7 SETUP","ltp":ltp,"sl":sl,"t1":ltp+r*2,"t2":ltp+r*4,"tier":"GOOD"}
+        if sell_pat and sell_score>=5:
+            sl=max(c3h,ltp*1.015); r=sl-ltp;
+            if r<ltp*0.004: return None
+            return {"t":"SELL","s":sym,"sc":f"{sell_score+1}/8","p":"+ ".join(pats),"ltp":ltp,"sl":sl,"t1":ltp-r*2,"t2":ltp-r*4,"tier":"STAR ⭐"}
+        if sell_score>=6:
+            sl=max(c3h,ltp*1.015); r=sl-ltp;
+            if r<ltp*0.004: return None
+            return {"t":"SELL","s":sym,"sc":f"{sell_score}/7","p":"7/7 SETUP","ltp":ltp,"sl":sl,"t1":ltp-r*2,"t2":ltp-r*4,"tier":"GOOD"}
     except: return None
-    return None
 
-# MAIN
-api_key=(os.getenv("ANGEL_API_KEY") or "").strip()
-client_id=(os.getenv("ANGEL_CLIENT_ID") or "").strip()
-pwd=(os.getenv("ANGEL_PASSWORD") or "").strip()
-totp_secret=(os.getenv("ANGEL_TOTP_SECRET") or "").strip()
-bot_token=(os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
-chat_id=(os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+movers=get_nse_750_movers(); buys=[]; sells=[]
+for sym in movers[:60]:
+    res=analyze(sym)
+    if res:
+        if res['t']=='BUY' and len(buys)<10: buys.append(res)
+        if res['t']=='SELL' and len(sells)<10: sells.append(res)
 
-obj=SmartConnect(api_key=api_key)
-obj.generateSession(client_id,pwd,pyotp.TOTP(totp_secret).now())
-
-today=datetime.now()
-from_d=(today-timedelta(days=5)).strftime("%Y-%m-%d 09:15")
-to_d=today.strftime("%Y-%m-%d 15:30")
-
-all_syms, cat_map = get_1000_with_category()
-
-results=[]
-with concurrent.futures.ThreadPoolExecutor(max_workers=25) as ex:
-    futs=[ex.submit(analyze,(s,obj,from_d,to_d,cat_map)) for s in all_syms]
-    for f in concurrent.futures.as_completed(futs):
-        r=f.result()
-        if r: results.append(r)
-
-print(f"Signals Found: {len(results)}")
-
-def get_top(cat, side):
-    filt=[x for x in results if x['cat']==cat and x['side']==side]
-    return sorted(filt, key=lambda x: x['score'], reverse=True)[0] if filt else None
-
-# GUARANTEED 6 - प्रत्येक Cat मधून 1 BUY 1 SELL
-large_buy=get_top("LARGE","BUY")
-large_sell=get_top("LARGE","SELL")
-mid_buy=get_top("MID","BUY")
-mid_sell=get_top("MID","SELL")
-small_buy=get_top("SMALL","BUY")
-small_sell=get_top("SMALL","SELL")
-
-final_6 = [x for x in [large_buy, large_sell, mid_buy, mid_sell, small_buy, small_sell] if x]
-
-save_state([{"symbol":x['sym'],"side":x['side'],"cat":x['cat']} for x in final_6[:2]], [{"symbol":x['sym'],"side":x['side'],"cat":x['cat']} for x in final_6[2:]])
-
-msg=f"🎯 INTRADAY 6 TRADE | {today.strftime('%d %b %H:%M')} IST | 5Min\n"
-msg+=f"Scan {len(all_syms)} | L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])}\n"
-msg+=f"--------------------------------\n"
-for x in final_6:
-    msg+=f"{x['side']} {x['sym']}({x['cat']}) {x['score']}/8\nE:{x['ltp']:.1f} SL:{x['sl']:.1f} T1:{x['t1']} T2:{x['t2']}\n{','.join(x['conds'][:3])}\n\n"
-
-if not final_6:
-    msg+= "No Setup Found - Next 5Min"
-
-send_telegram(bot_token, chat_id, msg)
-print(msg)
+msg=f"🚀 LIVE MONDAY | {ist_now.strftime('%d %b %H:%M')} IST\nNSE 750 Large+Mid+Small Gainers/Losers\n\nBUY ({len(buys)}):\n"
+if buys:
+    for r in buys: msg+=f"{r['tier']} {r['t']} {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
+else: msg+="No BUY 7/7 Now\n"
+msg+=f"\nSELL ({len(sells)}):\n"
+if sells:
+    for r in sells: msg+=f"{r['tier']} {r['t']} {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
+else: msg+="No SELL 7/7 Now\n"
+msg+=f"\nLogic: 3C BO/BD+EMA9/15>VWAP+ST+RSI+MACD+Vol+Pattern"
+print(msg); send_tg(msg)
