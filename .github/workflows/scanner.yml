@@ -1,20 +1,21 @@
-name: scan
+name: NSE 750 Scanner
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '15 3 * * 1-5'
+    - cron: '15 3 * * 1-5'  # 09:00 IST
+    - cron: '30 3 * * 1-5'  # 09:15 IST
+    - cron: '45 3 * * 1-5'  # 09:30 IST
+    - cron: '0 4 * * 1-5'   # 09:45 IST
+    - cron: '30 4 * * 1-5'  # 10:00 IST
+  workflow_dispatch:
 jobs:
-  build:
+  scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-      - name: Install deps
-        run: pip install pandas SmartApi-python pyotp requests logzero websocket-client
-      - name: Run Scanner
-        run: python scanner.py
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: pip install pandas SmartApi-python pyotp requests logzero websocket-client
+      - run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
