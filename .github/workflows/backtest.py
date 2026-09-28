@@ -1,4 +1,4 @@
-import requests, pyotp, os, concurrent.futures
+ import requests, pyotp, os, concurrent.futures
 from SmartApi import SmartConnect
 import pandas as pd, numpy as np
 from datetime import datetime, timedelta
