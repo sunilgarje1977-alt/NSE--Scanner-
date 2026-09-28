@@ -2,8 +2,8 @@ name: Intraday Top 6 Scanner
 
 on:
   schedule:
-    - cron: '*/5 3-10 * * 1-5'  # IST 09:00 ते 15:30 दर 5 मिनिटे (UTC 3:30 ते 10:00)
-  workflow_dispatch:  # Manual Run पण करता येईल
+    - cron: '*/5 3-10 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   scan:
@@ -23,11 +23,11 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install smartapi-python pyotp pandas requests
+          pip install smartapi-python pyotp pandas requests logzero websocket-client
 
-      - name: Restore Trades State (कालचा असेल तर)
+      - name: Restore Trades State
         run: |
-          if [ -f trades_state.json ]; then echo "State Found"; cat trades_state.json; else echo '{"date":"'$(date +%F)'","active":[],"closed":[],"total":0}' > trades_state.json; fi
+          if [ -f trades_state.json ]; then echo "State Found"; else echo '{"date":"'$(date +%F)'","active":[],"closed":[],"total":0}' > trades_state.json; fi
 
       - name: Run Scanner
         env:
@@ -40,18 +40,10 @@ jobs:
         run: |
           python scanner.py
 
-      - name: Save State Back to Repo (2 Active / 6 Total साठी लागेल)
+      - name: Save State Back to Repo
         run: |
           git config --global user.name "NSE Bot"
           git config --global user.email "bot@nse.com"
           git add trades_state.json || true
-          git diff --staged --quiet || git commit -m "Update trades state $(date +'%H:%M IST')" || true
-          git push || true
-
-      - name: Reset State at Day Start (09:15 ला)
-        if: github.event.schedule == '15 3 * * 1-5'
-        run: |
-          echo '{"date":"'$(date +%F)'","active":[],"closed":[],"total":0}' > trades_state.json
-          git add trades_state.json
-          git commit -m "Reset daily state" || true
+          git diff --staged --quiet || git commit -m "Update trades state $(date +'%H:%M')" || true
           git push || true
