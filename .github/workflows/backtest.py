@@ -1,160 +1,117 @@
 import requests, pyotp, os, concurrent.futures
 from SmartApi import SmartConnect
-import pandas as pd
-import numpy as np
+import pandas as pd, numpy as np
 from datetime import datetime, timedelta
 
 def get_token_map():
     d = requests.get("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json", timeout=15).json()
-    mp={}
-    for i in d:
-        if i.get("exch_seg")=="NSE" and i.get("symbol"):
-            sym=i["symbol"].replace("-EQ","").strip()
-            if sym not in mp: mp[sym]=i["token"]
-    return mp
+    return {i["symbol"].replace("-EQ",""): i["token"] for i in d if i.get("exch_seg")=="NSE" and i.get("symbol")}
 
 TOKEN_MAP = get_token_map()
+TEST = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","MARUTI","TITAN","SUNPHARMA","ULTRACEMCO","NTPC","POWERGRID","ONGC","ADANIENT","JSWSTEEL","TATASTEEL","BEL","HAL","BSE","MCX","TATAPOWER","WIPRO","TECHM","HCLTECH","CIPLA","DIVISLAB","M&M","BAJAJ-AUTO","SBILIFE","PFC","RECLTD","IREDA","RVNL","IRFC","IRCTC","BEML","BHEL","GAIL","VEDL","LICI","JSWENERGY","COFORGE","PERSISTENT","DIXON","POLYCAB","LTIM","BSOFT","APOLLOHOSP","MAXHEALTH","DLF","PIDILITIND","SRF","BANKBARODA","PNB","CANBK","AUBANK","FEDERALBNK","JIOFIN","ADANIPOWER","BALK RISIND".replace(" ",""),"360ONE","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","IDEA","ANANDRATHI","AHLUCONT"]
 
-# तुझी 1000 LIST मधले TOP 100 घेऊन Backtest - FAST साठी
-TEST_SYMBOLS = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","ASIANPAINT","MARUTI","TITAN","SUNPHARMA","ULTRACEMCO","NTPC","POWERGRID","ONGC","ADANIENT","ADANIPORTS","JSWSTEEL","TATASTEEL","HINDALCO","COALINDIA","BEL","HAL","BSE","MCX","TATAPOWER","TATAMOTORS","WIPRO","TECHM","HCLTECH","GRASIM","CIPLA","DIVISLAB","BRITANNIA","M&M","BAJAJ-AUTO","INDUSINDBK","SBILIFE","PFC","RECLTD","IREDA","RVNL","IRFC","IRCTC","BEML","BHEL","GAIL","VEDL","LICI","HINDZINC","JSWENERGY","COFORGE","PERSISTENT","MPHASIS","DIXON","KAYNES","POLYCAB","LTIM","BSOFT","APOLLOHOSP","MAXHEALTH","AUROPHARMA","LUPIN","GODREJPROP","DLF","PIDILITIND","SRF","MUTHOOTFIN","BANKBARODA","PNB","CANBK","AUBANK","FEDERALBNK","JIOFIN","ADANIPOWER","BALK RISIND".replace(" ",""),"HDFCBANK","ANANDRATHI","AHLUCONT","360ONE","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","NYKAA","IDEA","RVNL","IRFC","NHPC","SJVN"]
-
-def backtest_symbol(args):
-    sym, obj, days = args
+def backtest_sym(args):
+    sym, obj = args
     token = TOKEN_MAP.get(sym)
     if not token: return None
     try:
-        # 30 दिवसांचा data एका वेळी
-        to_d = datetime.now()
-        from_d = to_d - timedelta(days=days)
-        from_str = from_d.strftime("%Y-%m-%d 09:15")
-        to_str = to_d.strftime("%Y-%m-%d 15:30")
-        data = obj.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":from_str,"todate":to_str})
-        if not data or "data" not in data or not data["data"]: return None
-        df = pd.DataFrame(data["data"], columns=["ts","o","h","l","c","v"])
-        if len(df) < 100: return None
+        total_trades=[];
+        # 60 दिवस - दिवस-वार Backtest
+        for day_offset in range(1,61):
+            dt = datetime.now() - timedelta(days=day_offset)
+            if dt.weekday()>=5: continue
+            from_str = dt.strftime("%Y-%m-%d 09:15")
+            to_str = dt.strftime("%Y-%m-%d 15:30")
+            data = obj.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":from_str,"todate":to_str})
+            if not data or "data" not in data or not data["data"] or len(data["data"])<50: continue
+            df = pd.DataFrame(data["data"], columns=["ts","o","h","l","c","v"])
+            df["ema9"]=df["c"].ewm(9).mean(); df["ema15"]=df["c"].ewm(15).mean(); df["ema20"]=df["c"].ewm(20).mean()
+            df["vwap"]=(df["c"]*df["v"]).cumsum()/df["v"].cumsum()
+            delta=df["c"].diff(); gain=delta.where(delta>0,0).rolling(14).mean(); loss=-delta.where(delta<0,0).rolling(14).mean()
+            df["rsi"]=100-(100/(1+gain/loss)); df["macd"]=df["c"].ewm(12).mean()-df["c"].ewm(26).mean(); df["macd_sig"]=df["macd"].ewm(9).mean()
+            df["vol_avg"]=df["v"].rolling(20).mean(); df["atr"]=(df["h"]-df["l"]).rolling(14).mean()
+            # 1 दिवसात max 1 trade
+            traded=False
+            for i in range(30, len(df)-5):
+                if traded: break
+                last=df.iloc[i]; prev=df.iloc[i-1]
+                if pd.isna(last["rsi"]) or pd.isna(last["atr"]): continue
+                buy=0; sell=0
+                if last["c"]>last["o"] and prev["c"]<prev["o"]: buy+=1
+                if last["c"]<last["o"] and prev["c"]>prev["o"]: sell+=1
+                if prev["ema9"]<prev["ema15"] and last["ema9"]>last["ema15"]: buy+=1
+                if prev["ema9"]>prev["ema15"] and last["ema9"]<last["ema15"]: sell+=1
+                if df["c"].iloc[i-2:i+1].is_monotonic_increasing: buy+=1
+                if df["c"].iloc[i-2:i+1].is_monotonic_decreasing: sell+=1
+                if last["ema9"]>last["vwap"]: buy+=1
+                else: sell+=1
+                if last["c"]>last["ema20"]: buy+=1
+                else: sell+=1
+                if 45<=last["rsi"]<=68: buy+=1 # TIGHT RSI FILTER
+                if 32<=last["rsi"]<=58: sell+=1
+                if last["macd"]>last["macd_sig"]: buy+=1
+                else: sell+=1
+                if last["v"]>last["vol_avg"]*1.2: buy+=0.5; sell+=0.5 # Volume 1.2x पाहिजे
 
-        df["ema9"] = df["c"].ewm(span=9).mean()
-        df["ema15"] = df["c"].ewm(span=15).mean()
-        df["ema20"] = df["c"].ewm(span=20).mean()
-        df["vwap"] = (df["c"]*df["v"]).cumsum()/df["v"].cumsum()
-        delta = df["c"].diff()
-        gain = delta.where(delta>0,0).rolling(14).mean()
-        loss = -delta.where(delta<0,0).rolling(14).mean()
-        df["rsi"] = 100 - (100/(1+gain/loss))
-        df["macd"] = df["c"].ewm(span=12).mean() - df["c"].ewm(span=26).mean()
-        df["macd_sig"] = df["macd"].ewm(span=9).mean()
-        df["vol_avg"] = df["v"].rolling(20).mean()
-        df["atr"] = (df["h"]-df["l"]).rolling(14).mean()
+                ltp=float(last["c"]); atr=float(last["atr"]) if pd.notna(last["atr"]) else ltp*0.01
+                # SCORE 6/8 पाहिजे - आधी 4.5 होता म्हणून Loss जास्त!
+                if buy>=6 and not traded:
+                    entry=ltp; sl=ltp-atr*1.8; t1=ltp+atr*1.5; t2=ltp+atr*3
+                    # Exit simulation
+                    exit_price=None; pnl=0
+                    for j in range(i+1, len(df)):
+                        cur=df.iloc[j]
+                        if cur["l"]<=sl: exit_price=sl; pnl=sl-entry; break
+                        if cur["h"]>=t2: exit_price=t2; pnl=t2-entry; break
+                        if cur["h"]>=t1 and j>i+3: # T1 नंतर 15 min थांबून Trail
+                            if cur["c"]<cur["c"]-atr: exit_price=cur["c"]; pnl=cur["c"]-entry; break
+                    if exit_price is None: exit_price=float(df.iloc[-1]["c"]); pnl=exit_price-entry
+                    total_trades.append({"pnl":pnl,"r":pnl/(entry-sl) if entry!=sl else 0})
+                    traded=True
+                elif sell>=6 and not traded:
+                    entry=ltp; sl=ltp+atr*1.8; t1=ltp-atr*1.5; t2=ltp-atr*3
+                    exit_price=None
+                    for j in range(i+1, len(df)):
+                        cur=df.iloc[j]
+                        if cur["h"]>=sl: exit_price=sl; pnl=entry-sl; break
+                        if cur["l"]<=t2: exit_price=t2; pnl=entry-t2; break
+                        if cur["l"]<=t1 and j>i+3:
+                            if cur["c"]>cur["c"]+atr: exit_price=cur["c"]; pnl=entry-cur["c"]; break
+                    if exit_price is None: exit_price=float(df.iloc[-1]["c"]); pnl=entry-exit_price
+                    total_trades.append({"pnl":pnl,"r":pnl/(sl-entry) if sl!=entry else 0})
+                    traded=True
+        if not total_trades: return None
+        win=len([t for t in total_trades if t["pnl"]>0]); loss=len(total_trades)-win
+        avg_r=np.mean([t["r"] for t in total_trades])
+        total_pnl=sum([t["pnl"] for t in total_trades])
+        return {"sym":sym,"trades":len(total_trades),"win":win,"loss":loss,"wr":win/len(total_trades)*100,"avgR":avg_r,"pnl":total_pnl}
+    except: return None
 
-        trades=[]
-        for i in range(30, len(df)-10): # प्रत्येक candle वर signal check
-            last = df.iloc[i]; prev = df.iloc[i-1]
-            if pd.isna(last["rsi"]) or pd.isna(last["atr"]): continue
-
-            buy=0; sell=0
-            if last["c"]>last["o"] and prev["c"]<prev["o"]: buy+=1
-            if last["c"]<last["o"] and prev["c"]>prev["o"]: sell+=1
-            if prev["ema9"]<prev["ema15"] and last["ema9"]>last["ema15"]: buy+=1
-            if prev["ema9"]>prev["ema15"] and last["ema9"]<last["ema15"]: sell+=1
-            if df["c"].iloc[i-2:i+1].is_monotonic_increasing: buy+=1
-            if df["c"].iloc[i-2:i+1].is_monotonic_decreasing: sell+=1
-            if last["ema9"]>last["vwap"]: buy+=1
-            else: sell+=1
-            if last["c"]>last["ema20"]: buy+=1
-            else: sell+=1
-            if 40<=last["rsi"]<=70: buy+=1
-            if 20<=last["rsi"]<=60: sell+=1
-            if last["macd"]>last["macd_sig"]: buy+=1
-            else: sell+=1
-            if last["v"]>last["vol_avg"]*0.6: buy+=0.5; sell+=0.5
-
-            ltp = float(last["c"]); atr = float(last["atr"]) if pd.notna(last["atr"]) else ltp*0.007
-            # BUY Signal
-            if buy>=5:
-                entry = ltp; sl = min(df["l"].iloc[i-4:i+1].min(), ltp-atr*1.2)
-                t1 = ltp+atr*1.5; t2 = ltp+atr*3; trail = sl
-                # पुढचे 20 candle मध्ये result बघ
-                highest = entry
-                exit_price = None; status="OPEN"
-                for j in range(i+1, min(i+20, len(df))):
-                    future_ltp = float(df.iloc[j]["c"])
-                    if future_ltp>highest: highest=future_ltp
-                    if future_ltp>=t1 and trail<entry: trail=entry
-                    if future_ltp>=t1:
-                        nt = future_ltp - atr*1.2
-                        if nt>trail: trail=nt
-                    if future_ltp<=trail:
-                        exit_price=trail; status="TRAIL" if trail>=entry else "SL"; break
-                    if future_ltp>=t2: exit_price=t2; status="T2"; break
-                if exit_price is None: # 3:15 close
-                    exit_price = float(df.iloc[min(i+19, len(df)-1)]["c"]); status="EOD"
-                pnl = exit_price - entry
-                trades.append({"symbol":sym,"side":"BUY","entry":entry,"exit":exit_price,"pnl":pnl,"status":status})
-            elif sell>=5:
-                entry = ltp; sl = max(df["h"].iloc[i-4:i+1].max(), ltp+atr*1.2)
-                t1 = ltp-atr*1.5; t2 = ltp-atr*3; trail = sl
-                lowest = entry; exit_price=None; status="OPEN"
-                for j in range(i+1, min(i+20, len(df))):
-                    future_ltp = float(df.iloc[j]["c"])
-                    if future_ltp<lowest: lowest=future_ltp
-                    if future_ltp<=t1 and trail>entry: trail=entry
-                    if future_ltp<=t1:
-                        nt = future_ltp + atr*1.2
-                        if nt<trail: trail=nt
-                    if future_ltp>=trail:
-                        exit_price=trail; status="TRAIL" if trail<=entry else "SL"; break
-                    if future_ltp<=t2: exit_price=t2; status="T2"; break
-                if exit_price is None:
-                    exit_price = float(df.iloc[min(i+19, len(df)-1)]["c"]); status="EOD"
-                pnl = entry - exit_price
-                trades.append({"symbol":sym,"side":"SELL","entry":entry,"exit":exit_price,"pnl":pnl,"status":status})
-
-        if not trades: return None
-        total_pnl = sum([t["pnl"] for t in trades])
-        win = len([t for t in trades if t["pnl"]>0]); loss = len([t for t in trades if t["pnl"]<=0])
-        return {"symbol":sym,"trades":len(trades),"pnl":total_pnl,"win":win,"loss":loss,"winrate":win/len(trades)*100 if trades else 0,"details":trades[-3:]}
-    except Exception as e:
-        return None
-
-# LOGIN
 obj = SmartConnect(api_key=os.getenv("ANGEL_API_KEY","").strip())
 obj.generateSession(os.getenv("ANGEL_CLIENT_ID","").strip(), os.getenv("ANGEL_PASSWORD","").strip(), pyotp.TOTP(os.getenv("ANGEL_TOTP_SECRET","").strip()).now())
 
-print("BACKTEST START - 30 DAYS")
 results=[]
-with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
-    futs=[ex.submit(backtest_symbol,(s,obj,30)) for s in TEST_SYMBOLS]
+with concurrent.futures.ThreadPoolExecutor(max_workers=15) as ex:
+    futs=[ex.submit(backtest_sym,(s,obj)) for s in TEST]
     for f in concurrent.futures.as_completed(futs):
         r=f.result()
         if r: results.append(r)
 
-results = sorted(results, key=lambda x: x["pnl"], reverse=True)
+results=sorted(results, key=lambda x: x["avgR"], reverse=True)
+total_trades=sum([r["trades"] for r in results]); total_win=sum([r["win"] for r in results]); total_loss=sum([r["loss"] for r in results])
+avgR=np.mean([r["avgR"] for r in results]) if results else 0
+wr=total_win/total_trades*100 if total_trades else 0
 
-total_pnl = sum([r["pnl"] for r in results])
-total_trades = sum([r["trades"] for r in results])
-total_win = sum([r["win"] for r in results])
-total_loss = sum([r["loss"] for r in results])
+msg=f"📊 60 DAYS BACKTEST - IMPROVED (6/8 Score)\n"
+msg+=f"Total Trades: {total_trades}\n"
+msg+=f"Win: {total_win} Loss: {total_loss}\n"
+msg+=f"Winrate: {wr:.1f}%\n"
+msg+=f"Avg: {avgR:.2f}R\n"
+msg+=f"Top: {', '.join([r['sym']+':'+str(r['trades']) for r in results[:3]])}\n"
+msg+="---\nBest 5:\n"
+for r in results[:5]: msg+=f"{r['sym']} WR:{r['wr']:.0f}% AvgR:{r['avgR']:.2f}R Trades:{r['trades']}\n"
 
-print("\n========== BACKTEST REPORT (30 DAYS) ==========")
-print(f"Stocks Tested: {len(results)} | Total Trades: {total_trades}")
-print(f"Total PnL: {total_pnl:.2f} | Win:{total_win} Loss:{total_loss} WinRate:{total_win/total_trades*100 if total_trades else 0:.1f}%")
-print("-----------------------------------------------")
-for r in results[:10]:
-    print(f"{r['symbol']}: {r['trades']} Trades | PnL:{r['pnl']:.2f} | W:{r['win']} L:{r['loss']} WR:{r['winrate']:.1f}%")
-
-print("\nTOP LOSER:")
-for r in results[-5:]:
-    print(f"{r['symbol']}: PnL:{r['pnl']:.2f} WR:{r['winrate']:.1f}%")
-
-# Telegram ला पण पाठव
-msg = f"📊 BACKTEST 30 DAYS | {len(results)} Stocks\n"
-msg+=f"Total Trades: {total_trades} | PnL: {total_pnl:.2f}\n"
-msg+=f"W:{total_win} L:{total_loss} WR:{total_win/total_trades*100 if total_trades else 0:.1f}%\n"
-msg+="--------------------------------\nTOP 5:\n"
-for r in results[:5]:
-    msg+=f"{r['symbol']}: {r['pnl']:.1f} ({r['win']}/{r['trades']} WR:{r['winrate']:.0f}%)\n"
-
+print(msg)
 import requests
-try:
-    requests.post(f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage", data={"chat_id":os.getenv("TELEGRAM_CHAT_ID"),"text":msg}, timeout=10)
+try: requests.post(f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage", data={"chat_id":os.getenv("TELEGRAM_CHAT_ID"),"text":msg}, timeout=10)
 except: pass
