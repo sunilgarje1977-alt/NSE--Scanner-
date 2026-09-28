@@ -21,36 +21,41 @@ if not os.path.exists("scrip_master.json"):
 with open("scrip_master.json") as f: master=json.load(f)
 token_map={s['name']:s['token'] for s in master if s['exch_seg']=='NSE' and s['symbol'].endswith('-EQ')}
 
-# === LIVE MONDAY NSE 750 ===
+# === BALANCED NSE 750 - LARGE 20 + MID 20 + SMALL 20 ===
 def get_nse_750_movers():
-    headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"}
+    headers={"User-Agent":"Mozilla/5.0"}
     s=requests.Session()
     try: s.get("https://www.nseindia.com",headers=headers,timeout=5)
     except: pass
-    all_stocks=[]
-    for idx in ["NIFTY 100","NIFTY MIDCAP 150","NIFTY SMALLCAP 250"]:
+    
+    final_list=[]
+    indices = [("NIFTY 100","LARGE"), ("NIFTY MIDCAP 150","MID"), ("NIFTY SMALLCAP 250","SMALL")]
+    
+    for idx_name, cat in indices:
         try:
-            url=f"https://www.nseindia.com/api/equity-stockIndices?index={idx.replace(' ','%20')}"
+            url=f"https://www.nseindia.com/api/equity-stockIndices?index={idx_name.replace(' ','%20')}"
             r=s.get(url,headers=headers,timeout=10).json()
             if 'data' in r:
-                for it in r['data']:
-                    if it.get('lastPrice',0)>50:
-                        all_stocks.append({'symbol':it['symbol'],'pChange':it.get('pChange',0),'lastPrice':it.get('lastPrice',0)})
-            print(f"{idx} -> {len(r.get('data',[]))}")
+                data = [x for x in r['data'] if x.get('lastPrice',0)>50]
+                df = pd.DataFrame(data).sort_values('pChange', ascending=False)
+                top10 = df.head(10)['symbol'].tolist() # Top 10 Gainers of this cap
+                bottom10 = df.tail(10)['symbol'].tolist() # Top 10 Losers of this cap
+                final_list.extend(top10 + bottom10)
+                print(f"{cat} {idx_name}: Gainers {top10[:2]} Losers {bottom10[:2]}")
         except Exception as e:
-            print(f"{idx} Fail {e}")
+            print(f"{cat} Fail {e}")
 
-    if len(all_stocks)<60:
-        print("API Fail -> Using LIVE Monday Mix 750")
-        # Large + Mid + Small Mix - आज Live साठी
-        return ["RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","SBIN","BHARTIARTL","ITC","LT","MARUTI","TITAN","SUNPHARMA","NTPC","POWERGRID","ONGC","COALINDIA","TATAMOTORS","M&M","JSWSTEEL","TATASTEEL","HAL","BEL","BDL","MAZDOCK","RVNL","IRFC","PFC","RECLTD","BHEL","SAIL","NHPC","SJVN","NMDC","CONCOR","BANKBARODA","PNB","CANBK","IDFCFIRSTB","FEDERALBNK","ASHOKLEY","MOTHERSON","TATAPOWER","ADANIPOWER","IRCTC","ZOMATO","POLYCAB","DIXON","KPITTECH","PERSISTENT","COFORGE","LTTS","TATAELXSI","KAYNES","BSE","CDSL","IEX","MCX","SUZLON","IDEA","YESBANK"]
-
-    df=pd.DataFrame(all_stocks).drop_duplicates('symbol')
-    df=df.sort_values('pChange',ascending=False)
-    gainers=df.head(30)['symbol'].tolist()
-    losers=df.tail(30)['symbol'].tolist()
-    print(f"LIVE 750 -> Gainers {gainers[:5]} Losers {losers[:5]} Total {len(gainers+losers)}")
-    return gainers + losers
+    if len(final_list)<30:
+        print("API Fail -> Hardcoded Balanced Mix")
+        final_list = [
+            # LARGE 20
+            "RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","MARUTI","TITAN","SUNPHARMA","NTPC","POWERGRID","ONGC","TATAMOTORS","JSWSTEEL","TATASTEEL","BAJFINANCE","ULTRACEMCO",
+            # MID 20
+            "HAL","BEL","BDL","MAZDOCK","RVNL","IRFC","PFC","RECLTD","BHEL","SAIL","NHPC","SJVN","NMDC","BANKBARODA","PNB","CANBK","IDFCFIRSTB","ASHOKLEY","MOTHERSON","TATAPOWER",
+            # SMALL 20
+            "POLYCAB","DIXON","KPITTECH","PERSISTENT","BSE","CDSL","KAYNES","TATAELXSI","IEX","MCX","SUZLON","ZOMATO","IRCTC","IDEA","YESBANK","HFCL","NBCC","JPASSOCIAT","RENUKA","RPOWER"
+        ]
+    return final_list[:60]
 
 def get_pat(df):
     if len(df)<4: return []
@@ -106,16 +111,15 @@ movers=get_nse_750_movers(); buys=[]; sells=[]
 for sym in movers[:60]:
     res=analyze(sym)
     if res:
-        if res['t']=='BUY' and len(buys)<10: buys.append(res)
-        if res['t']=='SELL' and len(sells)<10: sells.append(res)
+        if res['t']=='BUY' and len(buys)<15: buys.append(res)
+        if res['t']=='SELL' and len(sells)<15: sells.append(res)
 
-msg=f"🚀 LIVE MONDAY | {ist_now.strftime('%d %b %H:%M')} IST\nNSE 750 Large+Mid+Small Gainers/Losers\n\nBUY ({len(buys)}):\n"
+msg=f"🔥 LIVE 7/7 BALANCED | {ist_now.strftime('%d %b %H:%M')} IST\nLARGE(20)+MID(20)+SMALL(20) = 60 Scan\n\nBUY ({len(buys)}):\n"
 if buys:
-    for r in buys: msg+=f"{r['tier']} {r['t']} {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
-else: msg+="No BUY 7/7 Now\n"
+    for r in buys: msg+=f"{r['tier']} {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
+else: msg+="No BUY Now\n"
 msg+=f"\nSELL ({len(sells)}):\n"
 if sells:
-    for r in sells: msg+=f"{r['tier']} {r['t']} {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
-else: msg+="No SELL 7/7 Now\n"
-msg+=f"\nLogic: 3C BO/BD+EMA9/15>VWAP+ST+RSI+MACD+Vol+Pattern"
+    for r in sells: msg+=f"{r['tier']} {r['s']} {r['sc']} {r['p']} E:{r['ltp']:.1f} SL:{r['sl']:.1f} T1:{r['t1']:.1f} T2:{r['t2']:.1f}\n"
+else: msg+="No SELL Now\n"
 print(msg); send_tg(msg)
