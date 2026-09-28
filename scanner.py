@@ -49,10 +49,9 @@ def get_nifty_trend(obj):
     except: return "UP"
     return "UP"
 
-# TRUE CATEGORY - BUG FIX
 TRUE_SMALL_MID = set(["PRAJIND","DAMCAPITAL","RSYSTEMS","SMCGLOBAL","SYNCOMF","SDBL","ZENSAR","VBL","NBCC","KPITTECH","RAILTEL","IRCON","MAZAGON","TITAGARH","JWL","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","IDEA","NHPC","SJVN","SAIL","COCHINSHIP","HUDCO","BEML","BHEL","PFC","RECLTD","IREDA","RVNL","IRFC","BSE","MCX","DIXON","KAYNES","POLYCAB","COFORGE","PERSISTENT","GRSE","BEL","HAL"])
 
-PRIORITY = ["PRAJIND","COCHINSHIP","JWL","TITAGARH","GRSE","HUDCO","NBCC","ZENSAR","VBL","DAMCAPITAL","RSYSTEMS","SMCGLOBAL","SYNCOMF","SDBL","RVNL","IRFC","BEML","BHEL","PFC","RECLTD","IREDA","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","IDEA","BSE","MCX","DIXON","KAYNES","POLYCAB","COFORGE","PERSISTENT","NHPC","SJVN","NMDC","SAIL","KPITTECH","RAILTEL","IRCON","MAZAGON","BHARTIARTL","SBIN","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","MARUTI","TITAN","SUNPHARMA","ULTRACEMCO","NTPC","POWERGRID","ONGC","ADANIENT","JSWSTEEL","TATASTEEL","BEL","HAL","TATAPOWER","WIPRO","TECHM","HCLTECH","CIPLA","DIVISLAB","M&M","BAJAJ-AUTO","SBILIFE"]
+PRIORITY = ["PRAJIND","COCHINSHIP","JWL","TITAGARH","GRSE","HUDCO","NBCC","ZENSAR","VBL","DAMCAPITAL","RSYSTEMS","SMCGLOBAL","SYNCOMF","SDBL","RVNL","IRFC","BEML","BHEL","PFC","RECLTD","IREDA","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","IDEA","BSE","MCX","DIXON","KAYNES","POLYCAB","COFORGE","PERSISTENT","NHPC","SJVN","NMDC","SAIL","KPITTECH","RAILTEL","IRCON","MAZAGON","BHARTIARTL","SBIN","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","MARUTI","TITAN","SUNPHARMA"]
 
 all_syms=[]
 for s in PRIORITY:
@@ -66,7 +65,6 @@ all_syms=all_syms[:1000]
 cat_map={}
 for s in all_syms:
     if s in TRUE_SMALL_MID:
-        # Small vs Mid
         if s in ["PRAJIND","DAMCAPITAL","RSYSTEMS","SMCGLOBAL","SYNCOMF","SDBL","ZENSAR","VBL","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","IDEA"]: cat_map[s]="SMALL"
         else: cat_map[s]="MID"
     else:
@@ -120,7 +118,6 @@ def fast_analyze(args):
         orb_low=min(lows[:6]) if len(lows)>=6 else min(lows)
         body=abs(ltp-last_o); rng=max(highs[-1],last_o)-min(lows[-1],last_o)+1e-9
         wick_pct=1-(body/rng)
-
         day_low = min(lows); day_high = max(highs); day_open = opens[0]
         recovery_pct = ((ltp - day_low) / (day_low+1e-9)) * 100
         fall_from_high = ((day_high - ltp) / (day_high+1e-9)) * 100
@@ -128,20 +125,15 @@ def fast_analyze(args):
         day_gain_pct = ((ltp - day_open) / (day_open+1e-9)) * 100
         vol_avg_20=float(vol_avg[-1]) if vol_avg[-1]==vol_avg[-1] else 1
         volx = vols[-1]/vol_avg_20 if vol_avg_20>0 else 1
-
         cat=cat_map.get(sym,"SMALL")
         is_small_mid = cat in ["SMALL","MID"]
         if is_small_mid:
             if wick_pct>0.88: return None
         else:
             if wick_pct>0.75: return None
-
-        # 5 MIN BREAKOUT/BREAKDOWN LEVELS
         last_10_high = max(highs[-10:-1]) if len(highs)>=11 else max(highs[:-1])
         last_10_low = min(lows[-10:-1]) if len(lows)>=11 else min(lows[:-1])
-
         buy=0; sell=0; bc=[]; sc=[]
-        # Basic
         if ltp>last_o and prev_c<prev_o and (ltp-last_o)>(prev_o-prev_c)*0.7: buy+=1; bc.append("ENG")
         if ltp<last_o and prev_c>prev_o and (last_o-ltp)>(prev_c-prev_o)*0.7: sell+=1; sc.append("ENG")
         if ema9[-2]<ema15[-2] and ema9[-1]>ema15[-1]: buy+=1; bc.append("9x15")
@@ -160,21 +152,16 @@ def fast_analyze(args):
         last_5_high=max(highs[-5:]); last_5_low=min(lows[-5:])
         if vols[-1]>vol_avg_20*1.0 and ltp>=last_5_high*0.998: buy+=1.2; bc.append(f"VOL-BO {volx:.1f}x")
         if vols[-1]>vol_avg_20*1.0 and ltp<=last_5_low*1.002: sell+=1.2; sc.append(f"VOL-BD {volx:.1f}x")
-
-        # ===== 5 MIN CANDLE BREAKOUT / BREAKDOWN =====
         if ltp > last_10_high * 1.0005:
             if volx>=0.9: buy+=2.8; bc.append(f"5m-BO {((ltp-last_10_high)/last_10_high*100):.1f}%")
             else: buy+=1.5; bc.append("5m-BO")
         if ltp < last_10_low * 0.9995:
             if volx>=0.9: sell+=2.8; sc.append(f"5m-BD {((last_10_low-ltp)/ltp*100):.1f}%")
             else: sell+=1.5; sc.append("5m-BD")
-        # ORB BREAKOUT
         if ltp > orb_high * 1.001: buy+=2.0; bc.append(f"ORB-BO {((ltp-orb_high)/orb_high*100):.1f}%")
         if ltp < orb_low * 0.999: sell+=2.0; sc.append(f"ORB-BD {((orb_low-ltp)/orb_low*100):.1f}%")
         if st_dir==1 and ltp>orb_high: buy+=1; bc.append("ST+ORB")
         if st_dir==-1 and ltp<orb_low: sell+=1; sc.append("ST+ORB")
-
-        # ===== SMALL+MID ULTRA LOGIC =====
         if is_small_mid:
             if day_gain_pct >= 0.6:
                 if day_gain_pct >= 1.0: buy+=2.5; bc.append(f"SM-DAY+ {day_gain_pct:.1f}%")
@@ -185,24 +172,16 @@ def fast_analyze(args):
                 if day_gain_pct <= -1.0: sell+=2.5; sc.append(f"SM-DAY- {day_gain_pct:.1f}%")
                 if last_5m_chg <= -0.15: sell+=1.2; sc.append(f"S-DN {last_5m_chg:.1f}%")
                 if fall_from_high >= 1.0: sell+=1.0; sc.append(f"FALL {fall_from_high:.1f}%")
-
         if cat=="SMALL":
             if buy>0: buy+=1.0; bc.append("S-BONUS")
             if sell>0: sell+=1.0; sc.append("S-BONUS")
         elif cat=="MID":
             if buy>0: buy+=0.7; bc.append("M-BONUS")
             if sell>0: sell+=0.7; sc.append("M-BONUS")
-
-        # Threshold - Low for Small/Mid
         buy_thresh = 2.0 if is_small_mid else 3.5
         sell_thresh = 1.6 if is_small_mid else 3.0
-
-        # Bullish ला Day Green पाहिजे, Bearish ला Red
-        if buy>=buy_thresh and day_gain_pct < -1.0 and is_small_mid:
-            return None
-        if sell>=sell_thresh and day_gain_pct > 1.0 and is_small_mid:
-            return None
-
+        if buy>=buy_thresh and day_gain_pct < -1.0 and is_small_mid: return None
+        if sell>=sell_thresh and day_gain_pct > 1.0 and is_small_mid: return None
         if buy>=buy_thresh:
             sl=round(min(lows[-6:]),1)
             return {"sym":sym,"side":"BUY","score":buy,"cat":cat,"ltp":ltp,"sl":sl,"t1":round(ltp+atr_last*1.5,1),"t2":round(ltp+atr_last*3,1),"trail":round(ltp-atr_last*1.2,1),"conds":bc,"atr":atr_last,"recov":recovery_pct,"day_chg":day_gain_pct,"last_5m":last_5m_chg,"volx":volx}
@@ -302,46 +281,54 @@ win_today=len([p for p in pnl_hist if p["date"]==today_str and p["pnl"]>0]); los
 buy_res=[r for r in results if r["side"]=="BUY"]
 sell_res=[r for r in results if r["side"]=="SELL"]
 
-msg=f"⚡ v11 FULL | SMALL+MID + 5m BO/BD | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
+msg=f"⚡ v12 FINAL | SMALL+MID + 5m BO/BD + TARGET | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
 msg+=f"Scan 1000/1000 | Found {len(results)} (B:{len(buy_res)} S:{len(sell_res)}) | Daily {today_count}/{DAILY_TARGET}\n"
-msg+=f"L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])} <- REAL!\n"
+msg+=f"L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])}\n"
 msg+="--------------------------------\n"
 
 if buy_res:
     small_buy=[x for x in buy_res if x["cat"] in ["SMALL","MID"]]
     if small_buy:
-        top_buy=sorted(small_buy, key=lambda x: x["day_chg"], reverse=True)[:6]
-        msg+=f"🔥 BULLISH SMALL+MID 5m-BO ({len(small_buy)}):\n"
+        top_buy=sorted(small_buy, key=lambda x: x["day_chg"], reverse=True)[:5]
+        msg+=f"🔥 BULLISH S+M 5m-BO ({len(small_buy)}):\n"
         for b in top_buy:
-            msg+=f"{b['sym']}({b['cat']}) P:{b['ltp']} Chg:{b['day_chg']:.1f}% 5m:{b['last_5m']:.1f}% | {','.join(b['conds'][:2])}\n"
+            msg+=f"{b['sym']}({b['cat']}) P:{b['ltp']} Chg:{b['day_chg']:.1f}% | {','.join(b['conds'][:2])}\n"
         msg+="--------------------------------\n"
 
 if sell_res:
     small_sell=[x for x in sell_res if x["cat"] in ["SMALL","MID"]]
     if small_sell:
-        top_sell=sorted(small_sell, key=lambda x: x["day_chg"])[:4]
-        msg+=f"🔻 BEARISH SMALL+MID 5m-BD ({len(small_sell)}):\n"
+        top_sell=sorted(small_sell, key=lambda x: x["day_chg"])[:3]
+        msg+=f"🔻 BEARISH S+M 5m-BD ({len(small_sell)}):\n"
         for b in top_sell:
             msg+=f"{b['sym']}({b['cat']}) P:{b['ltp']} Chg:{b['day_chg']:.1f}% | {','.join(b['conds'][:2])}\n"
         msg+="--------------------------------\n"
 
 burst=[r for r in results if "5m-BO" in str(r["conds"]) or "5m-BD" in str(r["conds"]) or "ORB-BO" in str(r["conds"])]
 if burst:
-    msg+=f"⚡ 5 MIN BREAKOUT/BREAKDOWN:\n"
-    for m in sorted(burst, key=lambda x: x["last_5m"], reverse=True)[:5]:
-        msg+=f"{m['side']} {m['sym']}({m['cat']}) {m['ltp']} {','.join(m['conds'][:2])}\n"
+    msg+=f"⚡ 5 MIN BO/BD:\n"
+    for m in sorted(burst, key=lambda x: x["last_5m"], reverse=True)[:4]:
+        msg+=f"{m['side']} {m['sym']}({m['cat']}) {','.join(m['conds'][:2])}\n"
     msg+="--------------------------------\n"
 
 if closed:
     msg+=f"📊 CLOSED ({len(closed)}):\n"
     for c in closed: msg+=f"{c['side']} {c['symbol']} PnL:{c['pnl']}\n"
     msg+="--------------------------------\n"
+
 msg+=f"🔄 ACTIVE ({len(combined_active)}/{MAX_ACTIVE}):\n"
 for a in combined_active:
-    msg+=f"{a['side']} {a['symbol']}({a.get('cat','')}) E:{a['price']} LTP:{a.get('ltp','')} Trail:{a.get('trail_sl','')} S:{a.get('score','')}\n"
+    sc = round(float(a.get('score',0)),1)
+    msg+=f"{a['side']} {a['symbol']}({a.get('cat','')}) E:{a['price']} LTP:{a.get('ltp','')}\n"
+    msg+=f" 🎯 T1:{a.get('t1')} T2:{a.get('t2')} SL:{a.get('trail_sl')} S:{sc}\n"
 msg+="--------------------------------\n"
+if pending:
+    msg+=f"⏳ PENDING ({len(pending)}):\n"
+    for p in pending[:3]:
+        msg+=f"{p['side']} {p['symbol']}({p['cat']}) E:{p['price']} T1:{p['t1']} T2:{p['t2']} SL:{p['sl']}\n"
+    msg+="--------------------------------\n"
 msg+=f"📈 TODAY: {today_pnl:.2f} | TOTAL: {total_pnl:.2f} | W:{win_today} L:{loss_today}\n"
-msg+=f"v11: 5m-BO/BD | ORB-BO/BD | S/M Thresh 2.0/1.6 | Day Green=BUY\n"
+msg+=f"v12 CLEAN | Target ON | 5m-BO/BD | Thresh 2.0/1.6\n"
 
 send_tg(os.getenv("TELEGRAM_BOT_TOKEN","").strip(), os.getenv("TELEGRAM_CHAT_ID","").strip(), msg)
-print(msg)
+print(msg) 
