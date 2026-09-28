@@ -1,26 +1,35 @@
-name: NSE 750 LIVE
+name: Intraday Top 6 Scanner
+
 on:
   schedule:
-    - cron: '15 3 * * 1-5'  # 08:45 IST Pre-Market
-    - cron: '30 3 * * 1-5'  # 09:00 IST
-    - cron: '45 3 * * 1-5'  # 09:15 IST OPEN
-    - cron: '0 4 * * 1-5'   # 09:30 IST
-    - cron: '15 4 * * 1-5'  # 09:45 IST
-    - cron: '30 4 * * 1-5'  # 10:00 IST
-    - cron: '0 5 * * 1-5'   # 10:30 IST
-    - cron: '0 6 * * 1-5'   # 11:30 IST
-    - cron: '0 8 * * 1-5'   # 13:30 IST
-    - cron: '45 9 * * 1-5'  # 15:15 IST CLOSE
-  workflow_dispatch:
+    - cron: '*/5 3-10 * * 1-5'  # IST 09:00 ते 15:30 दर 5 मिनिटे (UTC 3:30 ते 10:00)
+  workflow_dispatch:  # Manual Run पण करता येईल
+
 jobs:
   scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.11'}
-      - run: pip install pandas SmartApi-python pyotp requests logzero websocket-client
-      - run: python scanner.py
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install smartapi-python pyotp pandas requests
+
+      - name: Restore Trades State (कालचा असेल तर)
+        run: |
+          if [ -f trades_state.json ]; then echo "State Found"; cat trades_state.json; else echo '{"date":"'$(date +%F)'","active":[],"closed":[],"total":0}' > trades_state.json; fi
+
+      - name: Run Scanner
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
@@ -28,3 +37,21 @@ jobs:
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python scanner.py
+
+      - name: Save State Back to Repo (2 Active / 6 Total साठी लागेल)
+        run: |
+          git config --global user.name "NSE Bot"
+          git config --global user.email "bot@nse.com"
+          git add trades_state.json || true
+          git diff --staged --quiet || git commit -m "Update trades state $(date +'%H:%M IST')" || true
+          git push || true
+
+      - name: Reset State at Day Start (09:15 ला)
+        if: github.event.schedule == '15 3 * * 1-5'
+        run: |
+          echo '{"date":"'$(date +%F)'","active":[],"closed":[],"total":0}' > trades_state.json
+          git add trades_state.json
+          git commit -m "Reset daily state" || true
+          git push || true
