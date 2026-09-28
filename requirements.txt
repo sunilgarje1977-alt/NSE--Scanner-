@@ -1,7 +1,8 @@
-smartapi-python
+requests
 pandas
 pyotp
-requests
+SmartApi-python
+numpy
 logzero
+python-dateutil
 websocket-client
-pycryptodome
