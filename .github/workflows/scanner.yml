@@ -1,4 +1,4 @@
-name: v8 SMALL+MID 9:15-3:00
+name: v9 SMALL+MID GUARANTEED
 on:
   schedule:
     - cron: '45,50,55 3 * * 1-5'
