@@ -1,8 +1,7 @@
-import requests, json, os, time, pyotp
+import requests, json, os, time, pyotp, urllib.parse
 from SmartApi import SmartConnect
 import pandas as pd
 
-# On Time साठी 70 Sec Wait
 print("Waiting 70 sec for Candle Close...")
 time.sleep(70)
 
@@ -21,6 +20,15 @@ def load_state():
 def save_state(active, pending):
     with open(STATE_FILE,'w') as f:
         json.dump({"active":active, "pending":pending}, f)
+
+def send_telegram(bot_token, chat_id, msg):
+    try:
+        # FIX: GET मध्ये \n चालत नाही म्हणून POST वापरतोय
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {"chat_id": chat_id, "text": msg}
+        requests.post(url, data=payload, timeout=10)
+    except Exception as e:
+        print(f"Telegram Error: {e}")
 
 def get_token_map():
     try:
@@ -41,9 +49,7 @@ def get_top_movers():
     s=requests.Session()
     try: s.get("https://www.nseindia.com",headers=headers,timeout=5)
     except: pass
-
     permanent = ["NTPC","POWERGRID","ONGC","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BANKBARODA","PNB","CANBK","BEL","HAL","BHEL","TATAPOWER","TATASTEEL","JSWSTEEL","HINDALCO","LT","MARUTI","TITAN","ZOMATO","PAYTM","IRFC","RVNL","BSE","CDSL","MCX","KAYNES","DIXON","POLYCAB","COFORGE","PERSISTENT","PFC","RECLTD","SUZLON","IEX","TATAELXSI","IDEA","YESBANK","IDFCFIRSTB","SAIL","NHPC","COALINDIA","ADANIENT","ADANIPORTS"]
-
     gainers=list(permanent); losers=list(permanent)
     for idx in ["NIFTY 100","NIFTY MIDCAP 150","NIFTY SMALLCAP 250"]:
         try:
@@ -56,7 +62,6 @@ def get_top_movers():
                 gainers.extend(df.head(30)['symbol'].tolist())
                 losers.extend(df.tail(30)['symbol'].tolist())
         except: continue
-
     gainers=list(dict.fromkeys(gainers))[:50]
     losers=list(dict.fromkeys(losers))[:50]
     print(f"SCAN LIST: Gainers {len(gainers)} Losers {len(losers)}")
@@ -88,20 +93,16 @@ def analyze(df):
     df['macd']=ema12-ema26
     df['macd_sig']=df['macd'].ewm(span=9).mean()
     df['vol_avg']=df['v'].rolling(20).mean()
-
     last=df.iloc[-1]; prev=df.iloc[-2]
     ltp=last['c']; vol=last['v']; vavg=last['vol_avg']
-
     bull_engulf = last['c']>last['o'] and prev['c']<prev['o'] and last['c']>prev['o']
     bear_engulf = last['c']<last['o'] and prev['c']>prev['o'] and last['c']<prev['o']
     cross_up = prev['ema9']<prev['ema15'] and last['ema9']>last['ema15']
     cross_dn = prev['ema9']>prev['ema15'] and last['ema9']<last['ema15']
     cbd3 = df['c'].iloc[-3:].is_monotonic_decreasing
     cbu3 = df['c'].iloc[-3:].is_monotonic_increasing
-
     buy_score=0; sell_score=0
     buy_cond=[]; sell_cond=[]
-
     if bull_engulf: buy_score+=1; buy_cond.append("BULL_ENGULF")
     if bear_engulf: sell_score+=1; sell_cond.append("BEAR_ENGULF")
     if cross_up: buy_score+=1; buy_cond.append("9x15 UP")
@@ -118,12 +119,10 @@ def analyze(df):
     if last['rsi']<60 and last['rsi']>20: sell_score+=1; sell_cond.append(f"RSI{int(last['rsi'])}")
     if last['macd']>last['macd_sig']: buy_score+=1; buy_cond.append("MACD+")
     if last['macd']<last['macd_sig']: sell_score+=1; sell_cond.append("MACD-")
-
     vol_need = vavg*0.5 if ltp<500 else vavg*0.7
     if vol>vol_need:
         buy_score+=0.5; sell_score+=0.5
         buy_cond.append("VOL"); sell_cond.append("VOL")
-
     if buy_score>=5: return ("BUY", buy_score, buy_cond, ltp)
     if sell_score>=5: return ("SELL", sell_score, sell_cond, ltp)
     return None
@@ -163,21 +162,19 @@ for sym in all_syms:
 
 save_state(active, pending)
 
-# FIXED: f-string Error काढला - आता 100% चालेल
 active_str = ", ".join([str(a["side"]) + " " + str(a["symbol"]) for a in active])
 pending_str = ", ".join([str(p["symbol"]) for p in pending[:3]])
 new_str = ""
 for s in new_signals:
-    emoji = "BUY" if s["side"]=="BUY" else "SELL"
-    new_str += f"{emoji} {s['symbol']} {s['score']}/8 {s['conds']}\n"
+    new_str += f"{s['side']} {s['symbol']} {s['score']}/8 {s['conds']}\n"
 
 now_time = pd.Timestamp.now().strftime("%H:%M")
 msg = f"{now_time} SCAN {len(all_syms)} | Active {len(active)}/2 Pending {len(pending)}\n"
 if new_signals:
-    msg += f"NEW {len(new_signals)} ACTIVE:\n{new_str}\n"
+    msg += f"NEW {len(new_signals)}:\n{new_str}\n"
 else:
     msg += "No New Signal\n"
 msg += f"ACTIVE: {active_str}\nPENDING: {pending_str}"
 
-requests.get(f"https://api.telegram.org/bot{bot_token}/sendMessage?chat_id={chat_id}&text={msg}")
+send_telegram(bot_token, chat_id, msg)
 print(msg)
