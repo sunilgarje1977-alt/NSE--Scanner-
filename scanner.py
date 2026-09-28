@@ -49,7 +49,8 @@ def get_nifty_trend(obj):
     except: return "UP"
     return "UP"
 
-PRIORITY = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","MARUTI","TITAN","SUNPHARMA","ULTRACEMCO","NTPC","POWERGRID","ONGC","ADANIENT","JSWSTEEL","TATASTEEL","BEL","HAL","BSE","MCX","TATAPOWER","WIPRO","TECHM","HCLTECH","CIPLA","DIVISLAB","M&M","BAJAJ-AUTO","SBILIFE","PFC","RECLTD","RVNL","IRFC","BEML","BHEL","GAIL","VEDL","JSWENERGY","COFORGE","PERSISTENT","DIXON","POLYCAB","LTIM","APOLLOHOSP","DLF","BANKBARODA","PNB","CANBK","JIOFIN","BALKRISIND","360ONE","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","IDEA","DAMCAPITAL","RSYSTEMS","SMCGLOBAL","SYNCOMF","SDBL","RSYSTE"]
+# PRIORITY - SMALL + MID FIRST
+PRIORITY = ["PRAJIND","COCHINSHIP","JWL","TITAGARH","GRSE","HUDCO","NBCC","ZENSAR","VBL","DAMCAPITAL","RSYSTEMS","SMCGLOBAL","SYNCOMF","SDBL","RVNL","IRFC","BEML","BHEL","PFC","RECLTD","IREDA","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","IDEA","BSE","MCX","DIXON","KAYNES","POLYCAB","COFORGE","PERSISTENT","BHARTIARTL","SBIN","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","MARUTI","TITAN","SUNPHARMA","ULTRACEMCO","NTPC","POWERGRID","ONGC","ADANIENT","JSWSTEEL","TATASTEEL","BEL","HAL","TATAPOWER","WIPRO","TECHM","HCLTECH","CIPLA","DIVISLAB","M&M","BAJAJ-AUTO","SBILIFE","VEDL","JSWENERGY","LTIM","APOLLOHOSP","DLF","BANKBARODA","PNB","CANBK","JIOFIN","BALKRISIND"]
 
 all_syms=[]
 for s in PRIORITY:
@@ -61,20 +62,10 @@ for s in sorted(TOKEN_MAP.keys()):
 all_syms=all_syms[:1000]
 cat_map={s:"LARGE" if i<150 else "MID" if i<500 else "SMALL" for i,s in enumerate(all_syms)}
 
-FAST_150_LARGE = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","ASIANPAINT","MARUTI","TITAN","SUNPHARMA","ULTRACEMCO","NTPC","POWERGRID","ONGC","ADANIENT","ADANIPORTS","JSWSTEEL","TATASTEEL","HINDALCO","COALINDIA","BEL","HAL","BSE","MCX","TATAPOWER","TATAMOTORS","WIPRO","TECHM","HCLTECH","GRASIM","CIPLA","DIVISLAB","BRITANNIA","M&M","BAJAJ-AUTO","INDUSINDBK","SBILIFE","PFC","RECLTD","IREDA","RVNL","IRFC","IRCTC","BEML","BHEL","GAIL","VEDL","LICI","HINDZINC","JSWENERGY","COFORGE","PERSISTENT","MPHASIS","DIXON","KAYNES","POLYCAB","LTIM","BSOFT","APOLLOHOSP","MAXHEALTH","AUROPHARMA","LUPIN","GODREJPROP","DLF","PIDILITIND","SRF","MUTHOOTFIN","BANKBARODA","PNB","CANBK","AUBANK","FEDERALBNK","JIOFIN","ADANIPOWER","TATAINVEST","CONCOR","NHPC","SJVN","NMDC","SAIL","JINDALSTEL","KPITTECH","KEI","ZOMATO","PAYTM","NYKAA","DELHIVERY","IDEA","YESBANK","SUZLON","IEX","TEJASNET","HFCL","RAILTEL","IRCON","MAZAGON","COCHINSHIP","PRAJIND","JWL","TITAGARH","GRSE","HUDCO","NBCC","ZENSAR","ROUTE","VBL","JUBLFOOD","KALYANKJIL","KAJARIACER","LALPATHLAB","LAURUSLABS","LTF","LTTS","M&MFIN","MANAPPURAM","MARICO","MOTHERSON","NCC","OBEROIRLTY","OFSS","OIL","SONACOMS","TATACHEM","TATACOMM","TATAELXSI","TRENT","TVSMOTOR","UBL","UPL","VOLTAS","BALKRISIND","ANANDRATHI","AHLUCONT","360ONE"]
-
-now=datetime.now()
-hour_min=now.hour*60+now.minute
-IS_MORNING_MOMENTUM = 555 <= hour_min <= 630
-
-if IS_MORNING_MOMENTUM:
-    SCAN_LIST=all_syms
-    WORKERS=60
-    LAYER_NAME="LAYER-2 FULL 1000 (Mid/Small Momentum) 9:15-10:30"
-else:
-    SCAN_LIST=[s for s in FAST_150_LARGE if s in TOKEN_MAP]
-    WORKERS=80
-    LAYER_NAME="LAYER-1 FAST 150 Large Cap 10:30 नंतर"
+# FULL DAY 9:15 to 3:00 - SMALL+MIDCAP FOCUS
+SCAN_LIST = all_syms
+WORKERS = 60
+LAYER_NAME = "FULL 1000 | SMALL+MIDCAP 9:15-3:00 ON"
 
 def supertrend_dir(c,h,l, period=10, mult=3):
     try:
@@ -90,7 +81,7 @@ def supertrend_dir(c,h,l, period=10, mult=3):
     except: return 1
 
 def fast_analyze(args):
-    sym,obj,from_d,to_d,nifty_trend,is_morning=args
+    sym,obj,from_d,to_d,nifty_trend=args
     token=TOKEN_MAP.get(sym)
     if not token: return None
     try:
@@ -120,9 +111,7 @@ def fast_analyze(args):
         wick_pct=1-(body/rng)
         if wick_pct>0.72: return None
 
-        # ===== PHOTO LOGIC - RECOVERY + MOMENTUM =====
-        day_low = min(lows); day_high = max(highs)
-        day_open = opens[0]
+        day_low = min(lows); day_high = max(highs); day_open = opens[0]
         recovery_pct = ((ltp - day_low) / (day_low+1e-9)) * 100
         fall_from_high = ((day_high - ltp) / (day_high+1e-9)) * 100
         last_5m_chg = ((closes[-1] - closes[-2]) / (closes[-2]+1e-9)) * 100
@@ -146,14 +135,10 @@ def fast_analyze(args):
         # 5 EMA20
         if ltp>ema20[-1] and ema20[-1]>ema20[-2]: buy+=1; bc.append("E20U")
         if ltp<ema20[-1] and ema20[-1]<ema20[-2]: sell+=1; sc.append("E20D")
-        # 6 RSI FINAL - Morning Tight, Afternoon Relaxed
+        # 6 RSI
         rsi_val=float(rsi[-1]) if rsi[-1]==rsi[-1] else 50
-        if is_morning:
-            if 55<=rsi_val<=65: buy+=1; bc.append(f"RSI-B {int(rsi_val)}")
-            if 35<=rsi_val<=48: sell+=1.5; sc.append(f"RSI-S {int(rsi_val)}")
-        else:
-            if 50<=rsi_val<=68: buy+=1; bc.append(f"RSI-B {int(rsi_val)}")
-            if 30<=rsi_val<=50: sell+=1.5; sc.append(f"RSI-S {int(rsi_val)}")
+        if 50<=rsi_val<=68: buy+=1; bc.append(f"RSI-B {int(rsi_val)}")
+        if 30<=rsi_val<=50: sell+=1.5; sc.append(f"RSI-S {int(rsi_val)}")
         # 7 MACD
         if macd[-1]>macd_sig[-1]: buy+=1; bc.append("MACD+")
         if macd[-1]<macd_sig[-1]: sell+=1; sc.append("MACD-")
@@ -162,40 +147,38 @@ def fast_analyze(args):
         if vols[-1]>vol_avg_20*1.2 and ltp>=last_5_high*0.998: buy+=1.5; bc.append(f"VOL-BO {volx:.1f}x")
         if vols[-1]>vol_avg_20*1.2 and ltp<=last_5_low*1.002: sell+=1.5; sc.append(f"VOL-BD {volx:.1f}x")
         # 9 ST+ORB
-        if st_dir==1 and ltp>orb_high and wick_pct<0.5:
-            if is_morning and nifty_trend=="UP": buy+=2; bc.append("ST+ORB")
-            elif not is_morning: buy+=1; bc.append("ST")
-        if st_dir==-1 and ltp<orb_low and wick_pct<0.5:
-            if is_morning and nifty_trend=="DOWN": sell+=2; sc.append("ST+ORB")
-            elif not is_morning: sell+=1; sc.append("ST")
+        if st_dir==1 and ltp>orb_high and wick_pct<0.5: buy+=1; bc.append("ST+ORB")
+        if st_dir==-1 and ltp<orb_low and wick_pct<0.5: sell+=1; sc.append("ST+ORB")
         # 10 Retest
         if abs(ltp-orb_high)/ltp<0.005 and ltp>orb_high: buy+=0.5; bc.append("RETEST")
         if abs(ltp-orb_low)/ltp<0.005 and ltp<orb_low: sell+=0.5; sc.append("RETEST")
-
-        # 11 RECOVERY BULLISH (Photo Top)
-        if recovery_pct >= 3.0 and day_gain_pct > 0.5:
+        # 11 RECOVERY BULLISH
+        if recovery_pct >= 2.5 and day_gain_pct > 0.5:
             buy+=2.0; bc.append(f"RECOV {recovery_pct:.1f}%")
-        if recovery_pct >= 8.0:
+        if recovery_pct >= 7.0:
             buy+=1.0; bc.append(f"STRONG-RECOV")
-        # 12 MOMENTUM BURST 5m (Photo Bottom)
-        if last_5m_chg >= 0.8 and volx>=1.2:
+        # 12 MOMENTUM BURST 5m
+        if last_5m_chg >= 0.6 and volx>=1.1:
             buy+=2.5; bc.append(f"MOM-BURST {last_5m_chg:.1f}%")
-        elif last_5m_chg >= 0.4 and day_gain_pct>1:
+        elif last_5m_chg >= 0.3 and day_gain_pct>1:
             buy+=1.0; bc.append(f"MOM {last_5m_chg:.1f}%")
-
-        # 13 SELL - FALL FROM HIGH + MOM DOWN
-        if fall_from_high >= 3.0 and day_gain_pct < -0.5:
+        # 13 SELL FALL + MOM DOWN
+        if fall_from_high >= 2.5 and day_gain_pct < -0.5:
             sell+=2.0; sc.append(f"FALL {fall_from_high:.1f}%")
-        if last_5m_chg <= -0.8 and volx>=1.2:
+        if last_5m_chg <= -0.6 and volx>=1.1:
             sell+=2.5; sc.append(f"MOM-DOWN {last_5m_chg:.1f}%")
 
-        # Nifty Bonus
-        if nifty_trend=="DOWN" and sell>0: sell+=0.5; sc.append("NIFTY-DOWN")
-        if nifty_trend=="UP" and buy>0: buy+=0.5; bc.append("NIFTY-UP")
-
+        # SMALL + MID BONUS - MAIN LOGIC
         cat=cat_map.get(sym,"SMALL")
-        buy_thresh = 4.0 if is_morning else 3.5
-        sell_thresh = 3.0 if is_morning else 2.8
+        if cat=="SMALL":
+            if buy>0: buy+=0.7; bc.append("SMALL-BONUS")
+            if sell>0: sell+=0.7; sc.append("SMALL-BONUS")
+        elif cat=="MID":
+            if buy>0: buy+=0.5; bc.append("MID-BONUS")
+            if sell>0: sell+=0.5; sc.append("MID-BONUS")
+
+        buy_thresh = 3.2 if cat in ["SMALL","MID"] else 4.0
+        sell_thresh = 2.7 if cat in ["SMALL","MID"] else 3.5
 
         if buy>=buy_thresh:
             sl=round(min(lows[-6:]),1)
@@ -247,7 +230,7 @@ for trade in state.get("active",[]):
 
 results=[]
 with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as ex:
-    futs=[ex.submit(fast_analyze,(s,obj,from_d,to_d,nifty_trend,IS_MORNING_MOMENTUM)) for s in SCAN_LIST]
+    futs=[ex.submit(fast_analyze,(s,obj,from_d,to_d,nifty_trend)) for s in SCAN_LIST]
     for f in concurrent.futures.as_completed(futs):
         r=f.result()
         if r: results.append(r)
@@ -259,7 +242,7 @@ def get_top(cat,side,exclude=[]):
 
 existing_syms=[a["symbol"] for a in new_active]+[c["symbol"] for c in closed]
 final_trades=[]
-for combo in [("LARGE","BUY"),("MID","BUY"),("SMALL","BUY"),("LARGE","SELL"),("MID","SELL"),("SMALL","SELL"),("LARGE","BUY"),("SMALL","BUY")]:
+for combo in [("SMALL","BUY"),("MID","BUY"),("SMALL","SELL"),("MID","SELL"),("SMALL","BUY"),("MID","BUY"),("SMALL","SELL"),("LARGE","BUY")]:
     if len(final_trades)>=DAILY_TARGET: break
     t=get_top(combo[0],combo[1],existing_syms+[x["sym"] for x in final_trades])
     if t: final_trades.append(t)
@@ -291,29 +274,29 @@ win_today=len([p for p in pnl_hist if p["date"]==today_str and p["pnl"]>0]); los
 buy_res=[r for r in results if r["side"]=="BUY"]
 sell_res=[r for r in results if r["side"]=="SELL"]
 
-msg=f"⚡ FINAL v6 | {LAYER_NAME} | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
-msg+=f"Scan {len(SCAN_LIST)}/1000 | Found {len(results)} (B:{len(buy_res)} S:{len(sell_res)}) | Daily {today_count}/{DAILY_TARGET}\n"
-msg+=f"L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])}\n"
+msg=f"⚡ v8 SMALL+MID | 9:15-3:00 ON | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
+msg+=f"Scan 1000/1000 | Found {len(results)} (B:{len(buy_res)} S:{len(sell_res)}) | Daily {today_count}/{DAILY_TARGET}\n"
+msg+=f"L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])} <- TARGET\n"
 msg+="--------------------------------\n"
 
 if buy_res:
-    top_buy=sorted(buy_res, key=lambda x: x["recov"], reverse=True)[:5]
-    msg+=f"🔥 BULLISH RECOVERY (तुझ्या Photo सारखे):\n"
+    top_buy=sorted(buy_res, key=lambda x: x["recov"], reverse=True)[:6]
+    msg+=f"🔥 BULLISH RECOVERY (Small+Mid):\n"
     for b in top_buy:
-        msg+=f"{b['sym']} Recov:{b['recov']:.1f}% Price:{b['ltp']} Chg:{b['day_chg']:.1f}% 5m:{b['last_5m']:.1f}% | {','.join(b['conds'][:2])}\n"
+        msg+=f"{b['sym']}({b['cat']}) Recov:{b['recov']:.1f}% P:{b['ltp']} Chg:{b['day_chg']:.1f}% 5m:{b['last_5m']:.1f}% | {','.join(b['conds'][:2])}\n"
     msg+="--------------------------------\n"
 if sell_res:
     top_sell=sorted(sell_res, key=lambda x: x["recov"], reverse=True)[:3]
-    msg+=f"🔻 BEARISH FALL:\n"
+    msg+=f"🔻 BEARISH FALL (Small+Mid):\n"
     for b in top_sell:
-        msg+=f"{b['sym']} Fall:{b['recov']:.1f}% Price:{b['ltp']} Chg:{b['day_chg']:.1f}% 5m:{b['last_5m']:.1f}% | {','.join(b['conds'][:2])}\n"
+        msg+=f"{b['sym']}({b['cat']}) Fall:{b['recov']:.1f}% P:{b['ltp']} Chg:{b['day_chg']:.1f}% | {','.join(b['conds'][:2])}\n"
     msg+="--------------------------------\n"
 
 burst=[r for r in results if "MOM-BURST" in str(r["conds"])]
 if burst:
     msg+=f"⚡ MOMENTUM BURST 5m:\n"
-    for m in sorted(burst, key=lambda x: x["last_5m"], reverse=True)[:4]:
-        msg+=f"{m['side']} {m['sym']} {m['ltp']} 5m:{m['last_5m']:.1f}% Vol:{m['volx']:.1f}x Recov:{m['recov']:.1f}%\n"
+    for m in sorted(burst, key=lambda x: x["last_5m"], reverse=True)[:5]:
+        msg+=f"{m['side']} {m['sym']}({m['cat']}) {m['ltp']} 5m:{m['last_5m']:.1f}% Vol:{m['volx']:.1f}x\n"
     msg+="--------------------------------\n"
 
 if closed:
@@ -329,10 +312,7 @@ if pending:
     for p in pending[:4]: msg+=f"{p['side']} {p['symbol']}({p['cat']}) E:{p['price']} SL:{p['sl']}\n"
     msg+="--------------------------------\n"
 msg+=f"📈 TODAY: {today_pnl:.2f} | TOTAL: {total_pnl:.2f} | W:{win_today} L:{loss_today} | WR:{(win/total_trades*100 if total_trades>0 else 0):.1f}%\n"
-if today_pnl>0: msg+=f"✅ Profit Day +{today_pnl:.2f}\n"
-elif today_pnl<0: msg+=f"❌ Loss Day {today_pnl:.2f}\n"
-else: msg+=f"➖ Open\n"
-msg+=f"RSI B:55-65/50-68 S:30-50 | RECOV>=3% | MOM>=0.8% + VOL 1.2x\n"
+msg+=f"SMALL 0.7 + MID 0.5 BONUS | Thresh S/M 3.2/2.7 | RECOV>=2.5% MOM>=0.6%\n"
 
 send_tg(os.getenv("TELEGRAM_BOT_TOKEN","").strip(), os.getenv("TELEGRAM_CHAT_ID","").strip(), msg)
 print(msg)
