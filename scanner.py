@@ -1,6 +1,7 @@
 import requests, json, os, pyotp, concurrent.futures
 from SmartApi import SmartConnect
 import pandas as pd
+from datetime import datetime, timedelta
 
 STATE_FILE = "active_trades.json"
 
@@ -21,10 +22,8 @@ def save_state(active, pending):
 def send_telegram(bot_token, chat_id, msg):
     try:
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        # FIX: data POST - Header Error जाणार नाही
         requests.post(url, data={"chat_id": chat_id, "text": msg}, timeout=10)
-    except Exception as e:
-        print(f"Telegram Error: {e}")
+    except Exception as e: print(f"Telegram Error {e}")
 
 def get_token_map():
     local_file = "token_map.json"
@@ -46,15 +45,49 @@ def get_token_map():
 TOKEN_MAP=get_token_map()
 
 def get_top_movers():
-    permanent = ["NTPC","POWERGRID","ONGC","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BANKBARODA","PNB","CANBK","BEL","HAL","BHEL","TATAPOWER","TATASTEEL","JSWSTEEL","HINDALCO","LT","MARUTI","TITAN","ZOMATO","PAYTM","IRFC","RVNL","BSE","CDSL","MCX","KAYNES","DIXON","POLYCAB","COFORGE","PERSISTENT","PFC","RECLTD","SUZLON","IEX","TATAELXSI","IDEA","YESBANK","IDFCFIRSTB","SAIL","NHPC"]
-    return permanent, []
+    headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept":"application/json"}
+    s=requests.Session()
+    try: s.get("https://www.nseindia.com",headers=headers,timeout=10)
+    except: pass
+
+    permanent = ["NTPC","POWERGRID","ONGC","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BANKBARODA","PNB","CANBK","BEL","HAL","BHEL","TATAPOWER","TATASTEEL","JSWSTEEL","HINDALCO","LT","MARUTI","TITAN","ZOMATO","PAYTM","IRFC","RVNL","BSE","CDSL","MCX","KAYNES","DIXON","POLYCAB","COFORGE","PERSISTENT","PFC","RECLTD","SUZLON","IEX","TATAELXSI","IDEA","YESBANK","IDFCFIRSTB","SAIL","NHPC","COALINDIA","ADANIENT","ADANIPORTS"]
+
+    gainers=list(permanent)
+    losers=list(permanent)
+
+    # NSE LIVE SCAN
+    indices = ["NIFTY 100","NIFTY MIDCAP 150","NIFTY SMALLCAP 250"]
+    nse_count=0
+    for idx in indices:
+        try:
+            url=f"https://www.nseindia.com/api/equity-stockIndices?index={idx.replace(' ','%20')}"
+            r=s.get(url,headers=headers,timeout=10).json()
+            if 'data' in r:
+                df=pd.DataFrame(r['data'])
+                df=df[df['lastPrice']>30]
+                df=df.sort_values('pChange',ascending=False)
+                top_g = df.head(20)['symbol'].tolist()
+                top_l = df.tail(20)['symbol'].tolist()
+                gainers.extend(top_g)
+                losers.extend(top_l)
+                nse_count+=len(top_g)+len(top_l)
+                print(f"NSE {idx}: +{len(top_g)} Gainers +{len(top_l)} Losers")
+        except Exception as e:
+            print(f"NSE {idx} Fail {e}")
+            continue
+
+    gainers=list(dict.fromkeys(gainers))[:60]
+    losers=list(dict.fromkeys(losers))[:60]
+    all_scan = list(dict.fromkeys(gainers+losers))[:100]
+    print(f"FINAL SCAN LIST: {len(all_scan)} Stocks (NSE Live {nse_count} + Permanent 48)")
+    return all_scan
 
 def analyze_symbol(args):
-    sym, obj = args
+    sym, obj, from_d, to_d = args
     token=TOKEN_MAP.get(sym)
     if not token: return None
     try:
-        param={"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":"2025-09-25 09:15","todate":"2025-09-28 15:30"}
+        param={"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":from_d,"todate":to_d}
         data=obj.getCandleData(param)
         if not data or 'data' not in data or not data['data']: return None
         df=pd.DataFrame(data['data'], columns=['ts','o','h','l','c','v'])
@@ -107,7 +140,6 @@ def analyze_symbol(args):
     except: return None
     return None
 
-# --- MAIN FIX: strip() टाकलं - \n Error जाईल ---
 api_key=(os.getenv("ANGEL_API_KEY") or "").strip()
 client_id=(os.getenv("ANGEL_CLIENT_ID") or "").strip()
 pwd=(os.getenv("ANGEL_PASSWORD") or "").strip()
@@ -123,11 +155,15 @@ state=load_state()
 active=state.get("active",[])
 pending=state.get("pending",[])
 
-gainers, _ = get_top_movers()
+today = datetime.now()
+from_d = (today - timedelta(days=5)).strftime("%Y-%m-%d 09:15")
+to_d = today.strftime("%Y-%m-%d 15:30")
+
+all_syms = get_top_movers()
 
 results=[]
 with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
-    futures = [executor.submit(analyze_symbol, (sym, obj)) for sym in gainers]
+    futures = [executor.submit(analyze_symbol, (sym, obj, from_d, to_d)) for sym in all_syms]
     for f in concurrent.futures.as_completed(futures):
         r=f.result()
         if r: results.append(r)
@@ -135,7 +171,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
 new_signals=[]
 for sym, side, score, conds, ltp in results:
     if any(x['symbol']==sym for x in active+pending): continue
-    item={"symbol":sym, "side":side, "score":score, "price":ltp, "conds":",".join(conds), "time":pd.Timestamp.now().strftime("%H:%M")}
+    item={"symbol":sym, "side":side, "score":score, "price":ltp, "conds":",".join(conds), "time":datetime.now().strftime("%H:%M")}
     if len(active)<2:
         active.append(item); new_signals.append(item)
     else:
@@ -143,17 +179,19 @@ for sym, side, score, conds, ltp in results:
 
 save_state(active, pending)
 
-active_str = ", ".join([str(a["side"]) + " " + str(a["symbol"]) for a in active])
-pending_str = ", ".join([str(p["symbol"]) for p in pending[:3]])
-new_str = "".join([f"{s['side']} {s['symbol']} {s['score']}/8 {s['conds']}\n" for s in new_signals])
+active_str = ", ".join([f"{a['side']} {a['symbol']}" for a in active])
+pending_str = ", ".join([f"{p['symbol']}" for p in pending[:5]])
+new_str = "".join([f"{s[1]} {s[0]} {s[2]}/8 {','.join(s[3])}\n" for s in results[:5]])
 
-now_time = pd.Timestamp.now().strftime("%H:%M")
-msg = f"{now_time} SCAN {len(gainers)} | Active {len(active)}/2 Pending {len(pending)}\n"
+now_time = datetime.now().strftime("%H:%M")
+msg = f"NSE LIVE SCAN {len(all_syms)} | {now_time}\nActive {len(active)}/2 Pending {len(pending)}\n"
 if new_signals:
-    msg += f"NEW:\n{new_str}\n"
+    msg += f"NEW SIGNALS:\n"
+    for s in new_signals:
+        msg+=f"{s['side']} {s['symbol']} {s['score']}/8\n"
 else:
-    msg += "No New Signal\n"
-msg += f"ACTIVE: {active_str}\nPENDING: {pending_str}"
+    msg += "No New - Active Full or No Setup\n"
+msg += f"ACTIVE: {active_str}\nPENDING: {pending_str}\nNSE: NIFTY100+MID150+SML250"
 
 send_telegram(bot_token, chat_id, msg)
 print(msg)
