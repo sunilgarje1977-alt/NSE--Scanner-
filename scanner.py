@@ -40,9 +40,9 @@ def get_token_map():
 TOKEN_MAP=get_token_map()
 
 def get_1000_with_category():
-    LARGE = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","ASIANPAINT","MARUTI","TITAN","SUNPHARMA","ULTRACEMCO","NTPC","POWERGRID","ONGC","ADANIENT","ADANIPORTS","JSWSTEEL","TATASTEEL","HINDALCO","COALINDIA","BEL","HAL","BSE","MCX","TATAPOWER","TATAMOTORS","WIPRO","TECHM","HCLTECH","GRASIM","CIPLA","DIVISLAB","DRREDDY","BRITANNIA","EICHERMOT","HEROMOTOCO","M&M","BAJAJ-AUTO","INDUSINDBK"]
-    MID = ["BANKBARODA","PNB","CANBK","IDFCFIRSTB","BANDHANBNK","AUBANK","FEDERALBNK","CUB","RBLBANK","PFC","RECLTD","IREDA","RVNL","IRFC","IRCTC","BEML","BHEL","CONCOR","NHPC","SJVN","NMDC","SAIL","HINDZINC","VEDL","JINDALSTEL","JSWENERGY","COFORGE","PERSISTENT","MPHASIS","KPITTECH","DIXON","KAYNES","POLYCAB","KEI","LTIM","BSOFT","MUTHOOTFIN","CHOLAFIN","PNBHOUSING","TATAELXSI","APOLLOHOSP","MAXHEALTH","FORTIS","AUROPHARMA","LUPIN","ALKEM","GODREJPROP","OBEROIRLTY","PRESTIGE"]
-    SMALL = ["ZOMATO","PAYTM","NYKAA","DELHIVERY","IDEA","YESBANK","SUZLON","IEX","CDSL","ANGELONE","AFFLE","AARTIIND","TEJASNET","HFCL","RAILTEL","IRCON","MAZAGON","GARDENREACH","COCHINSHIP","PRAJIND","JPOWER","TATACHEM","CHAMBLFERT","DEEPAKNTR","ATUL","TANLA","EASEMYTRIP","UCOBANK","IOB","MAHABANK","UNIONBANK","CENTRALBK","MOTILALOFS","CAMS","KFINTECH","RENUKA","BALRAMCHIN","VINATIORG","NAVINCORP","LATENTVIEW","STERLITE","TRIVENI","TATAINVEST","VBL","JWL","TITAGARH","BDL","GRSE","HUDCO","NBCC","SJVN","IRCON","HFCL","TANLA","AFFLE"]
+    LARGE = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","ASIANPAINT","MARUTI","TITAN","SUNPHARMA","ULTRACEMCO","NTPC","POWERGRID","ONGC","ADANIENT","ADANIPORTS","JSWSTEEL","TATASTEEL","HINDALCO","COALINDIA","BEL","HAL","BSE","MCX","TATAPOWER","TATAMOTORS","WIPRO","TECHM","HCLTECH"]
+    MID = ["BANKBARODA","PNB","CANBK","IDFCFIRSTB","BANDHANBNK","AUBANK","FEDERALBNK","CUB","RBLBANK","PFC","RECLTD","IREDA","RVNL","IRFC","IRCTC","BEML","BHEL","CONCOR","NHPC","SJVN","NMDC","SAIL","HINDZINC","VEDL","JINDALSTEL","JSWENERGY","COFORGE","PERSISTENT","MPHASIS","KPITTECH","DIXON","KAYNES","POLYCAB","KEI","LTIM","BSOFT","MUTHOOTFIN","CHOLAFIN","PNBHOUSING"]
+    SMALL = ["ZOMATO","PAYTM","NYKAA","DELHIVERY","IDEA","YESBANK","SUZLON","IEX","CDSL","ANGELONE","AFFLE","AARTIIND","TEJASNET","HFCL","RAILTEL","IRCON","MAZAGON","GARDENREACH","COCHINSHIP","PRAJIND","JPOWER","TATACHEM","CHAMBLFERT","DEEPAKNTR","ATUL","TANLA","EASEMYTRIP","UCOBANK","IOB","MAHABANK","UNIONBANK","CENTRALBK","MOTILALOFS","CAMS","KFINTECH"]
 
     headers={"User-Agent":"Mozilla/5.0"}
     s=requests.Session()
@@ -66,7 +66,6 @@ def get_1000_with_category():
         except: pass
 
     all_syms=list(dict.fromkeys(all_syms))[:1000]
-    print(f"SCAN LIST: {len(all_syms)} | LARGE {len([k for k,v in cat_map.items() if v=='LARGE'])} MID {len([k for k,v in cat_map.items() if v=='MID'])} SMALL {len([k for k,v in cat_map.items() if v=='SMALL'])}")
     return all_syms, cat_map
 
 def analyze(args):
@@ -117,7 +116,6 @@ def analyze(args):
     except: return None
     return None
 
-# MAIN
 api_key=(os.getenv("ANGEL_API_KEY") or "").strip()
 client_id=(os.getenv("ANGEL_CLIENT_ID") or "").strip()
 pwd=(os.getenv("ANGEL_PASSWORD") or "").strip()
@@ -146,80 +144,4 @@ def get_top(cat, side):
     filt=[x for x in results if x['cat']==cat and x['side']==side]
     return sorted(filt, key=lambda x: x['score'], reverse=True)[0] if filt else None
 
-large_buy=get_top("LARGE","BUY")
-large_sell=get_top("LARGE","SELL")
-mid_buy=get_top("MID","BUY")
-mid_sell=get_top("MID","SELL")
-small_buy=get_top("SMALL","BUY")
-small_sell=get_top("SMALL","SELL")
-
-final_6 = [x for x in [large_buy, large_sell, mid_buy, mid_sell, small_buy, small_sell] if x]
-
-# --- PROFIT/LOSS SUMMARY ---
-pnl_history=load_pnl()
-today_str=today.strftime("%Y-%m-%d")
-active_prev=state.get("active",[])
-# Old Active चे P&L काढ - LTP ने
-closed_pnl=[]
-active_now=[]
-for a in active_prev:
-    # Live LTP शोध
-    live = next((r for r in results if r['sym']==a.get('symbol')), None)
-    if live:
-        entry=a.get('price', live['ltp'])
-        ltp_now=live['ltp']
-        side=a.get('side','BUY')
-        if side=='BUY': pnl = ltp_now - entry
-        else: pnl = entry - ltp_now
-        # SL/TGT Hit Check
-        hit=""
-        if side=='BUY':
-            if ltp_now <= live['sl']: hit="SL HIT"
-            elif ltp_now >= live['t1']: hit="T1 HIT"
-        else:
-            if ltp_now >= live['sl']: hit="SL HIT"
-            elif ltp_now <= live['t1']: hit="T1 HIT"
-        if hit:
-            pnl_history.append({"date":today_str,"symbol":a.get('symbol'),"side":side,"entry":entry,"exit":ltp_now,"pnl":round(pnl,1),"result":hit,"time":today.strftime("%H:%M")})
-        else:
-            active_now.append(a)
-    else:
-        active_now.append(a)
-
-save_pnl(pnl_history)
-
-# New Active = Final 6 मधून 2
-new_active=[]
-for x in final_6[:2]:
-    new_active.append({"symbol":x['sym'],"side":x['side'],"cat":x['cat'],"price":x['ltp'],"sl":x['sl'],"t1":x['t1'],"t2":x['t2'],"time":today.strftime("%H:%M")})
-
-save_state(new_active, [{"symbol":x['sym'],"side":x['side'],"cat":x['cat'],"price":x['ltp'],"sl":x['sl'],"t1":x['t1'],"t2":x['t2']} for x in final_6[2:]])
-
-# --- TELEGRAM MESSAGE ---
-msg=f"🎯 INTRADAY 6 TRADE | {today.strftime('%d %b %H:%M')} IST | 5Min\n"
-msg+=f"Scan {len(all_syms)} | Found {len(results)} | L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])}\n"
-msg+=f"--------------------------------\n"
-for x in final_6:
-    msg+=f"{x['side']} {x['sym']}({x['cat']}) {x['score']}/8\nE:{x['ltp']:.1f} SL:{x['sl']:.1f} T1:{x['t1']} T2:{x['t2']}\n{','.join(x['conds'][:4])}\n\n"
-
-# P&L SUMMARY
-today_trades=[h for h in pnl_history if h['date']==today_str]
-today_pnl=sum([h['pnl'] for h in today_trades])
-win=len([h for h in today_trades if h['pnl']>0])
-loss=len([h for h in today_trades if h['pnl']<=0])
-
-msg+=f"--------------------------------\n"
-msg+=f"📊 P&L SUMMARY {today.strftime('%d %b')}\n"
-if today_trades:
-    for h in today_trades[-5:]:
-        emoji="🟢" if h['pnl']>0 else "🔴"
-        msg+=f"{emoji} {h['side']} {h['symbol']} {h['result']} P&L:{h['pnl']}\n"
-    msg+=f"Today P&L: ₹{today_pnl:.1f} | W:{win} L:{loss}\n"
-else:
-    msg+=f"Today Closed: 0 | Active: {len(new_active)}/2\n"
-    msg+=f"No SL/TGT Hit Yet\n"
-
-msg+=f"Active: {', '.join([f\"{a['symbol']}\" for a in new_active])}\n"
-
-send_telegram(bot_token, chat_id, msg)
-print(msg)
+large_buy=get_top 
