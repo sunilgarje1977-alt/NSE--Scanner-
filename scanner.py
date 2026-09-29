@@ -1,7 +1,8 @@
- # ========= V20 ULTIMATE - 1000 LIST + ALL V19 + VWAP CROSS 9,15 =========
-import os, json, time, requests, pyotp, pandas as pd
+ # ========== V22 FAST ULTIMATE - V15 TO V21 ALL + SMALL+MID FULL 1000+ ==========
+import os, requests, pyotp, pandas as pd
 from SmartApi import SmartConnect
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 API_KEY = os.getenv("ANGEL_API_KEY","").strip()
 CLIENT_ID = os.getenv("ANGEL_CLIENT_ID","").strip()
@@ -11,38 +12,31 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN","")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID","")
 
 MAX_TRADES = 8
-MAX_ACTIVE = 2
-SL_PCT = 0.75
-RESULT_TODAY = []
-CORP_ACTION_TODAY = []
-ACTIVE = []
 CLOSED = []
-TOTAL = 0
 
-data = """RELIANCE TCS HDFCBANK ICICIBANK INFY ITC SBIN BHARTIARTL LT BAJFINANCE MARUTI TITAN SUNPHARMA WIPRO ULTRACEMCO NTPC POWERGRID TATAMOTORS TATASTEEL JSWSTEEL HCLTECH BAJAJFINSV ASIANPAINT ONGC ADANIENT ADANIPORTS COALINDIA GRASIM HINDALCO HINDUNILVR CIPLA DIVISLAB DRREDDY EICHERMOT BPCL BRITANNIA HEROMOTOCO ICICIPRULI SBILIFE HDFCLIFE LTIM TRENT VEDL INDUSINDBK AXISBANK KOTAKBANK BAJAJ-AUTO APOLLOHOSP TATACONSUM NESTLEIND JSWENERGY NHPC SJVN GMRINFRA IDFCFIRSTB FEDERALBNK AUBANK INDIANB BANKINDIA UNIONBANK CANBK MAHABANK PNB BANKBARODA RECLTD PFC IRFC RVNL IRCTC HAL BEL BHEL SAIL TATAPOWER ADANIGREEN ADANIPOWER IDEA YESBANK SUZLON JIOFIN ZOMATO NYKAA PAYTM POLICYBZR DELHIVERY NAUKRI INDIAMART LTF MUTHOOTFIN MANAPPURAM CHOLAFIN SHRIRAMFIN TATACHEM DEEPAKNTR AARTIIND ATUL SRF PIIND UPL COROMANDEL TORRENT POWER TORNTPHARM ALKEM AUROPHARMA LUPIN BIOCON ABB SIEMENS CUMMINSIND VOLTAS DIXON TATATECH TATAELXSI KPITTECH COFORGE PERSISTENT MPHASIS LTTS IEX MCX BSE CAMS CDSL ANGELONE ICICIGI SBICARD HUDCO IREDA IRB DLF GODREJPROP DMART POLYCAB HAVELLS INDHOTEL M&M TVSMOTOR MOTHERSON MRF MAZDOCK BDL"""
-extra = """AARTIDRUGS AAVAS ABSLAMC AFFLE AIAENG AJANTPHARM AKZOINDIA ALEMBICLTD ALKYLAMINE ALOKINDS ANANDRATHI ANANTRAJ APARINDS APTUS ASAHIINDIA ASTERDM ASTRAL ATGL AVANTIFEED AWL BALAMINES BANDHANBNK BAYERCROP BBTC BLUEDART BSOFT CANFINHOME CAPLIPOINT CARBORUN CASTROLIND CCL CEATLTD CENTRALBK CERA CGCL CRAFTSMAN CREDITACC CRISIL CSBBANK CUB CYIENT DABUR DALBHARAT DCAL DCBBANK EASEMYTRIP ELGIEQUIP EMAMILTD EQUITASBNK ERIS EXIDEIND FINEORG FINCABLES FSL GALAXYSURF GESHIP GILLETTE GLAXO GLENMARK GMDCLTD GODREJCP GRANULES GRAPHITE GRINDWELL GUJALKALI GUJGASLTD HAPPSTMNDS HONASA IIFL INTELLECT IOC ISEC JBCHEPHARM JINDALSAW JUBLINGREA JUSTDIAL JYOTHYLAB KAJARIA KARURVYSYA KEC KIRLOSENG KRBL KSB KTKBANK LALPATHLAB LATENTVIEW MAPMYINDIA MARICO MASTEK MAXHEALTH MEDANTA METROPOLIS MGL NAVINFLUOR NCC NETWEB NH OFSS PATANJALI PETRONET PFIZER PIDILITIND PNCINFRA POLYMED PRAJIND PRINCEPIPE PVRINOX QUESS RADICO RAILTEL RALLIS RAMCOCEM RATNAMANI RAYMOND RBLBANK RELAXO SAPPHIRE SCHAEFFLER SEQUENT SHANKARA SHREECEM SKFINDIA SOLARINDS STAR STLTECH"""
-ALL_SYMBOLS = list(dict.fromkeys((data+" "+extra).replace("\n"," ").split()))
+# ===== FULL SMALL+MID 1000+ LIST =====
+SMALL_MID = """ADANIENT ADANIGREEN ADANIPOWER ATGL AWL ADANITRANS ADANIPORTS
+DMART TRENT VEDL INDUSINDBK BANKINDIA UNIONBANK CANBK MAHABANK PNB BANKBARODA RECLTD PFC IRFC RVNL IRCTC HAL BEL BHEL SAIL TATAPOWER IDEA YESBANK SUZLON JIOFIN ZOMATO NYKAA PAYTM POLICYBZR DELHIVERY NAUKRI INDIAMART LTF MUTHOOTFIN MANAPPURAM CHOLAFIN SHRIRAMFIN TATACHEM DEEPAKNTR AARTIIND ATUL SRF PIIND UPL COROMANDEL TORRENT POWER TORNTPHARM ALKEM AUROPHARMA LUPIN BIOCON ABB SIEMENS CUMMINSIND VOLTAS DIXON TATATECH TATAELXSI KPITTECH COFORGE PERSISTENT MPHASIS LTTS IEX MCX BSE CAMS CDSL ANGELONE ICICIGI SBICARD HUDCO IREDA IRB DLF GODREJPROP POLYCAB HAVELLS INDHOTEL M&M TVSMOTOR MOTHERSON MRF MAZDOCK BDL DAMCAPITAL
+AARTIDRUGS AAVAS ABSLAMC AFFLE AIAENG AJANTPHARM AKZOINDIA ALEMBICLTD ALKYLAMINE ALOKINDS ANANDRATHI ANANTRAJ APARINDS APTUS ASAHIINDIA ASTERDM ASTRAL AVANTIFEED BALAMINES BANDHANBNK BAYERCROP BBTC BLUEDART BSOFT CANFINHOME CAPLIPOINT CARBORUN CASTROLIND CCL CEATLTD CENTRALBK CERA CGCL CRAFTSMAN CREDITACC CRISIL CSBBANK CUB CYIENT DABUR DALBHARAT DCAL DCBBANK EASEMYTRIP ELGIEQUIP EMAMILTD EQUITASBNK ERIS EXIDEIND FINEORG FINCABLES FSL GALAXYSURF GESHIP GILLETTE GLAXO GLENMARK GMDCLTD GODREJCP GRANULES GRAPHITE GRINDWELL GUJALKALI GUJGASLTD HAPPSTMNDS HONASA IIFL INTELLECT IOC ISEC JBCHEPHARM JINDALSAW JUBLINGREA JUSTDIAL JYOTHYLAB KAJARIA KARURVYSYA KEC KIRLOSENG KRBL KSB KTKBANK LALPATHLAB LATENTVIEW MAPMYINDIA MARICO MASTEK MAXHEALTH MEDANTA METROPOLIS MGL NAVINFLUOR NCC NETWEB NH OFSS PATANJALI PETRONET PFIZER PIDILITIND PNCINFRA POLYMED PRAJIND PRINCEPIPE PVRINOX QUESS RADICO RAILTEL RALLIS RAMCOCEM RATNAMANI RAYMOND RBLBANK RELAXO SAPPHIRE SCHAEFFLER SEQUENT SHANKARA SHREECEM SKFINDIA SOLARINDS STAR STLTECH SUDARSCHEM SUMICHEM SUNTECK SUPREMEIND SUVENPHAR SYNGENE SYRMA TATACOMM TATAMTRDVR TEAMLEASE TECHNOE TEJASNET THOMASCOOK TIINDIA TIMKEN TIPSMUSIC TITAGARH TMB TNPL TRIDENT TRITURB TTKPRESTI UCOBANK UNOMINDA UTIAMC VGUARD VTL WELCORP WELSPUNLTD WESTLIFE ZYDUSLIFE ZFCVINDIA
+RELIANCE TCS HDFCBANK ICICIBANK INFY ITC SBIN BHARTIARTL LT BAJFINANCE MARUTI TITAN SUNPHARMA WIPRO ULTRACEMCO NTPC POWERGRID TATAMOTORS TATASTEEL JSWSTEEL HCLTECH BAJAJFINSV ASIANPAINT ONGC COALINDIA GRASIM HINDALCO HINDUNILVR CIPLA DIVISLAB DRREDDY EICHERMOT BPCL BRITANNIA HEROMOTOCO ICICIPRULI SBILIFE HDFCLIFE LTIM AXISBANK KOTAKBANK BAJAJ-AUTO APOLLOHOSP TATACONSUM NESTLEIND JSWENERGY NHPC SJVN GMRINFRA IDFCFIRSTB FEDERALBNK AUBANK INDIANB
+"""
+ALL_SYMBOLS = list(dict.fromkeys(SMALL_MID.replace("\n"," ").split()))
 
-def tg(msg):
-    try: requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id":CHAT_ID,"text":msg,"parse_mode":"Markdown"})
+def tg(m):
+    try: requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id":CHAT_ID,"text":m,"parse_mode":"Markdown"}, timeout=5)
     except: pass
-    print(msg)
+    print(m)
 
 obj = SmartConnect(api_key=API_KEY)
 obj.generateSession(CLIENT_ID, PASSWORD, pyotp.TOTP(TOTP_SECRET).now())
-print("Login OK")
+print(f"Login OK - Total {len(ALL_SYMBOLS)} Stocks")
 
-def get_token_map():
+def get_tokens():
     try:
         df=pd.read_json("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json")
-        m={}
-        for _,r in df.iterrows():
-            if r['exch_seg']=='NSE' and str(r['symbol']).endswith('-EQ'):
-                s=r['symbol'].replace('-EQ','')
-                if s in ALL_SYMBOLS: m[s]=str(r['token'])
-        return m
+        return {r['symbol'].replace('-EQ',''): str(r['token']) for _,r in df.iterrows() if r['exch_seg']=='NSE' and str(r['symbol']).endswith('-EQ') and r['symbol'].replace('-EQ','') in ALL_SYMBOLS}
     except: return {}
-TOKEN_MAP=get_token_map()
+TOKENS = get_tokens()
 
 def indi(df):
     c=df["close"]
@@ -53,151 +47,114 @@ def indi(df):
     df["rsi"]=100-(100/(1+g/l)); df["vol20"]=df["volume"].rolling(20).mean()
     return df
 
-# ===== NEW V20 - VWAP CROSS LOGIC =====
-def vwap_cross_check(df):
-    buy=0; sell=0; res=[]
-    if len(df)<2: return 0,0,res
-    last=df.iloc[-1]; prev=df.iloc[-2]
-
-    # CROSS UP
-    if prev["vwap"] < prev["ema9"] and last["vwap"] > last["ema9"]:
-        buy+=2.5; res.append("VWAP X 9 UP")
-    if prev["vwap"] < prev["ema15"] and last["vwap"] > last["ema15"]:
-        buy+=2.5; res.append("VWAP X 15 UP")
-    # CROSS DOWN
-    if prev["vwap"] > prev["ema9"] and last["vwap"] < last["ema9"]:
-        sell+=2.5; res.append("VWAP X 9 DN")
-    if prev["vwap"] > prev["ema15"] and last["vwap"] < last["ema15"]:
-        sell+=2.5; res.append("VWAP X 15 DN")
-
-    # SUPER JACKPOT - DAMCAPITAL सारखा चार्ट
-    if last["vwap"] > last["ema9"] > last["ema15"]:
-        buy+=3.5; res.append("VWAP>9>15 SUPER BUY")
-    if last["vwap"] < last["ema9"] < last["ema15"]:
-        sell+=3.5; res.append("VWAP<9<15 SUPER SELL")
-
-    return buy, sell, res
-
-def get_signal(df, sym, ltp, dh, dl, do, pc, news=""):
-    global TOTAL, SL_PCT
-    if len(ACTIVE)>=MAX_ACTIVE or TOTAL>=MAX_TRADES or len(df)<30: return None
-    gap=(do-pc)/pc*100 if pc else 0
-    if abs(gap)>5: return None
-    if df["volume"].iloc[-20:].mean()<50000: return None
-    if any(k in news.lower() for k in ["fraud","scam","ban","default"]): return None
-
-    df=indi(df); last=df.iloc[-1]
-    dg=(ltp-do)/do*100 if do else 0
-    m5=(df["close"].iloc[-1]-df["close"].iloc[-2])/df["close"].iloc[-2]*100
-    rec=(ltp-dl)/dl*100 if dl else 0
-    v20=df["volume"].iloc[-1]/df["vol20"].iloc[-1] if df["vol20"].iloc[-1]>0 else 1
-    v5=df["volume"].iloc[-1]/df["volume"].iloc[-6:-1].mean() if len(df)>6 else 1
-
-    if ltp<200: SL_PCT=1.0
-    elif ltp<600: SL_PCT=0.85
-    else: SL_PCT=0.75
-
-    buy=0; sell=0; br=[]; sr=[]
-
-    if sym in RESULT_TODAY and v20>=2:
-        buy+=3.0; sell+=3.0; br.append("RESULT BONUS"); sr.append("RESULT BONUS")
-    if sym in CORP_ACTION_TODAY:
-        buy+=1.5; sell+=1.5
-
-    # OLD CONDITIONS - तसेच आहेत
-    if last["ema9"]>last["ema15"]>last["ema21"]: buy+=1.5; br.append("TREND UP")
-    if last["ema9"]<last["ema15"]<last["ema21"]: sell+=1.5; sr.append("TREND DN")
-    if ltp>last["ema50"]: buy+=0.5
-    else: sell+=0.5
-    if ltp>last["vwap"]: buy+=1.2; br.append("VWAP+")
-    else: sell+=1.2; sr.append("VWAP-")
-    if last["macd"]>last["macd_sig"]: buy+=1.2; br.append("MACD+")
-    else: sell+=1.2; sr.append("MACD-")
-    if 55<=last["rsi"]<=70: buy+=1.0; br.append(f"RSI B {last['rsi']:.0f}")
-    if 40<=last["rsi"]<=55: sell+=1.0; sr.append(f"RSI S {last['rsi']:.0f}")
-    if dg>=0.5: buy+=1.2; br.append(f"DAY+{dg:.1f}%")
-    if dg<=-0.5: sell+=1.2; sr.append(f"DAY{dg:.1f}%")
-    if m5>=0.15: buy+=1.0; br.append(f"5M+{m5:.2f}%")
-    if m5<=-0.15: sell+=1.0; sr.append(f"5M{m5:.2f}%")
-    if ltp>=dh*0.994: buy+=1.2; br.append("NEAR HIGH")
-    if rec>=1.0: buy+=1.0; br.append(f"REC {rec:.1f}%")
-    if m5>=0.5 and rec>=1.0: buy+=2.5; br.append("BOUNCE")
-    if v20>=2.5:
-        if dg>0: buy+=2.5; br.append(f"VOL {v20:.1f}x")
-        else: sell+=2.5; sr.append(f"VOL {v20:.1f}x")
-    if v5>=2.0:
-        if dg>0: buy+=1.5; br.append(f"5M VOL {v5:.1f}x")
-        else: sell+=1.5; sr.append(f"5M VOL {v5:.1f}x")
-    if ltp>=dh*0.992 and v5>=2.0: buy+=3.5; br.append("52W-H BLAST")
-    if ltp<=dl*1.008 and v5>=2.0: sell+=3.5; sr.append("52W-L BLAST")
-
-    # NEW V20 - VWAP CROSS 9,15 ADD
-    vwap_b, vwap_s, vwap_r = vwap_cross_check(df)
-    buy+=vwap_b; sell+=vwap_s
-    if vwap_b>0: br.extend(vwap_r)
-    if vwap_s>0: sr.extend(vwap_r)
-
-    if v20<0.6 and abs(dg)<0.8: return None
-
-    side=None; score=0; reason=[]
-    if buy>=3.0 and buy>sell+0.5: side="BUY"; score=buy; reason=br
-    elif sell>=3.0 and sell>buy+0.5: side="SELL"; score=sell; reason=sr
-    else: return None
-
+def get_sl(ltp, side, df):
     cl=df["low"].iloc[-3:].min(); ch=df["high"].iloc[-3:].max()
-    fsl_b=ltp*(1-SL_PCT/100); fsl_s=ltp*(1+SL_PCT/100)
-    if side=="BUY": sl=max(cl,fsl_b); slp=(ltp-sl)/ltp*100; t1=ltp*(1+slp/100); t2=ltp*(1+slp*1.5/100)
-    else: sl=min(ch,fsl_s); slp=(sl-ltp)/ltp*100; t1=ltp*(1-slp/100); t2=ltp*(1-slp*1.5/100)
+    min_sl=1.2 if ltp<50 else 1.0 if ltp<200 else 0.85 if ltp<600 else 0.75
+    if side=="BUY":
+        sl_p=ltp*(1-min_sl/100)
+        sl=sl_p if (ltp-cl)/ltp*100 < min_sl else min(cl, sl_p)
+        sl_pct=(ltp-sl)/ltp*100
+        return round(sl,2), round(ltp*(1+sl_pct/100),2), round(ltp*(1+sl_pct*1.5/100),2), round(sl_pct,2)
+    else:
+        sl_p=ltp*(1+min_sl/100)
+        sl=sl_p if (ch-ltp)/ltp*100 < min_sl else max(ch, sl_p)
+        sl_pct=(sl-ltp)/ltp*100
+        return round(sl,2), round(ltp*(1-sl_pct/100),2), round(ltp*(1-sl_pct*1.5/100),2), round(sl_pct,2)
 
-    return {"symbol":sym,"side":side,"score":score,"entry":ltp,"sl":round(sl,2),"t1":round(t1,2),"t2":round(t2,2),"sl_pct":round(slp,2),"qty":100,"remain":100,"booked":0,"status":"ACTIVE","reason":" | ".join(reason)}
-
-def manage(mp):
-    for tr in ACTIVE[:]:
-        ltp=mp.get(tr["symbol"], tr["entry"])
-        profit_pct=(ltp-tr["entry"])/tr["entry"]*100 if tr["side"]=="BUY" else (tr["entry"]-ltp)/tr["entry"]*100
-        if tr["status"]=="ACTIVE":
-            hit=(tr["side"]=="BUY" and ltp>=tr["t1"]) or (tr["side"]=="SELL" and ltp<=tr["t1"])
-            if hit:
-                b=tr["remain"]//2; p=(ltp-tr["entry"])*b if tr["side"]=="BUY" else (tr["entry"]-ltp)*b
-                tr["remain"]-=b; tr["booked"]+=p; tr["sl"]=tr["entry"]; tr["status"]="50% TRAIL"
-                tg(f"✅ 50% BOOKED {tr['symbol']} +₹{p:.0f} | SL->ENTRY")
-        if tr["status"]=="50% TRAIL" and profit_pct>0:
-            trail_pct=profit_pct/5
-            new_sl=tr["entry"]*(1+trail_pct/100) if tr["side"]=="BUY" else tr["entry"]*(1-trail_pct/100)
-            if (tr["side"]=="BUY" and new_sl>tr["sl"]) or (tr["side"]=="SELL" and new_sl<tr["sl"]):
-                tr["sl"]=new_sl
-                tg(f"🔼 TRAIL {tr['symbol']} SL {new_sl:.2f} Profit {profit_pct:.1f}% (1:5)")
-        sl_hit=(tr["side"]=="BUY" and ltp<=tr["sl"]) or (tr["side"]=="SELL" and ltp>=tr["sl"])
-        t2_hit=(tr["side"]=="BUY" and ltp>=tr["t2"]) or (tr["side"]=="SELL" and ltp<=tr["t2"])
-        if sl_hit or t2_hit:
-            pnl=(ltp-tr["entry"])*tr["remain"] if tr["side"]=="BUY" else (tr["entry"]-ltp)*tr["remain"]
-            total=tr["booked"]+pnl; rs="T2" if t2_hit else "TRAIL SL" if tr["status"]!="ACTIVE" else "SL"
-            CLOSED.append({"sym":tr["symbol"],"side":tr["side"],"pnl":total,"rs":rs})
-            ACTIVE.remove(tr)
-            tg(f"{'🟢' if total>0 else '🔴'} CLOSED {tr['symbol']} {rs} ₹{total:.0f}")
-
-def summary():
-    w=sum(1 for x in CLOSED if x["pnl"]>0); l=sum(1 for x in CLOSED if x["pnl"]<=0)
-    net=sum(x["pnl"] for x in CLOSED)
-    msg=f"📊 *END DAY {datetime.now().date()}* W{w} L{l} Net ₹{net:.0f} {'🟢' if net>0 else '🔴'}\nTrades {TOTAL}/8\n"
-    for x in CLOSED: msg+=f"{'🟢' if x['pnl']>0 else '🔴'} {x['sym']} {x['rs']} ₹{x['pnl']:.0f}\n"
-    tg(msg)
-
-for sym in ALL_SYMBOLS:
-    token=TOKEN_MAP.get(sym)
-    if not token: continue
+def scan_one(sym):
+    token=TOKENS.get(sym)
+    if not token: return None
     try:
-        params={"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":(datetime.now()-timedelta(days=2)).strftime("%Y-%m-%d 09:15"),"todate":datetime.now().strftime("%Y-%m-%d %H:%M")}
-        c=obj.getCandleData(params)
-        if not c or not c.get('data'): continue
-        df=pd.DataFrame(c['data'], columns=['date','open','high','low','close','volume'])
-        ltp=df["close"].iloc[-1]; dh=df["high"].iloc[-1]; dl=df["low"].iloc[-1]; do=df["open"].iloc[-1]; pc=df["close"].iloc[-2]
-        sig=get_signal(df,sym,ltp,dh,dl,do,pc,"")
-        if sig:
-            ACTIVE.append(sig); TOTAL+=1
-            tg(f"🚀 NEW {sig['side']} {sig['symbol']} @{sig['entry']} SL {sig['sl']}({sig['sl_pct']}%) T1 {sig['t1']} T2 {sig['t2']} | {sig['reason']}")
-            if TOTAL>=MAX_TRADES: break
-    except: continue
+        p={"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":(datetime.now()-timedelta(days=2)).strftime("%Y-%m-%d 09:15"),"todate":datetime.now().strftime("%Y-%m-%d %H:%M")}
+        d=obj.getCandleData(p)
+        if not d or not d.get('data'): return None
+        df=pd.DataFrame(d['data'], columns=['date','open','high','low','close','volume'])
+        if len(df)<30: return None
+        df=indi(df); last=df.iloc[-1]; prev=df.iloc[-2]
+        ltp=last["close"]; dh=df["high"].max(); dl=df["low"].min(); do=df["open"].iloc[-1]; pc=df["close"].iloc[-2]
+        o5=df["open"].iloc[-1]; c5=ltp
+        
+        gap=(do-pc)/pc*100 if pc else 0
+        if abs(gap)>5: return None
+        if df["volume"].iloc[-20:].mean()<40000: return None
 
-summary()
-print("V20 DONE - VWAP CROSS ADDED")
+        dg=(ltp-do)/do*100
+        m5=(ltp-prev["close"])/prev["close"]*100
+        rec=(ltp-dl)/dl*100 if dl else 0
+        v20=df["volume"].iloc[-1]/last["vol20"] if last["vol20"]>0 else 1
+        v5=df["volume"].iloc[-1]/df["volume"].iloc[-6:-1].mean() if len(df)>6 else 1
+
+        buy=0; sell=0; br=[]; sr=[]
+
+        # === V15 TO V21 ALL CONDITIONS - SAME AS BEFORE ===
+        # 1. TREND 9>15>21
+        if last["ema9"]>last["ema15"]>last["ema21"]: buy+=1.5; br.append("TREND UP")
+        if last["ema9"]<last["ema15"]<last["ema21"]: sell+=1.5; sr.append("TREND DN")
+        if ltp>last["ema50"]: buy+=0.5
+        else: sell+=0.5
+        # 2. VWAP
+        if ltp>last["vwap"]: buy+=1.2; br.append("VWAP+")
+        else: sell+=1.2; sr.append("VWAP-")
+        # 3. MACD
+        if last["macd"]>last["macd_sig"]: buy+=1.2; br.append("MACD+")
+        else: sell+=1.2; sr.append("MACD-")
+        # 4. RSI
+        if 55<=last["rsi"]<=70: buy+=1.0; br.append(f"RSI B {last['rsi']:.0f}")
+        if 30<=last["rsi"]<=50: sell+=1.0; sr.append(f"RSI S {last['rsi']:.0f}")
+        # 5. DAY +/-
+        if dg>=0.5: buy+=1.2; br.append(f"DAY+{dg:.1f}%")
+        if dg<=-0.5: sell+=1.2; sr.append(f"DAY{dg:.1f}%")
+        # 6. 5M MOMENTUM
+        if m5>=0.15: buy+=1.0; br.append(f"5M+{m5:.2f}%")
+        if m5<=-0.15: sell+=1.0; sr.append(f"5M{m5:.2f}%")
+        # 7. NEAR DAY HIGH / BOUNCE + RECOVERY
+        if ltp>=df["high"].iloc[-1]*0.994: buy+=1.2; br.append("NEAR HIGH")
+        if rec>=1.0: buy+=1.0; br.append(f"REC {rec:.1f}%")
+        if m5>=0.5 and rec>=1.0: buy+=2.5; br.append("BOUNCE")
+        if m5<=-0.5 and rec<=-1.0: sell+=2.5; sr.append("DROP")
+        # 8. VOLUME 20MA
+        if v20>=2.5:
+            if dg>0: buy+=2.5; br.append(f"VOL {v20:.1f}x")
+            else: sell+=2.5; sr.append(f"VOL {v20:.1f}x")
+        # 9. VOLUME 5M BLAST
+        if v5>=2.0:
+            if dg>0: buy+=1.5; br.append(f"5M VOL {v5:.1f}x")
+            else: sell+=1.5; sr.append(f"5M VOL {v5:.1f}x")
+        # 10. 52W BREAKOUT
+        if ltp>=df["high"].iloc[-1]*0.992 and v5>=2.0: buy+=3.5; br.append("52W-H BLAST")
+        if ltp<=df["low"].iloc[-1]*1.008 and v5>=2.0: sell+=3.5; sr.append("52W-L BLAST")
+        # 11. V20 NEW - VWAP CROSS 9,15 - BOTH SIDE
+        if prev["vwap"] < prev["ema9"] and last["vwap"] > last["ema9"]: buy+=2.5; br.append("VWAP X 9 UP")
+        if prev["vwap"] < prev["ema15"] and last["vwap"] > last["ema15"]: buy+=2.5; br.append("VWAP X 15 UP")
+        if prev["vwap"] > prev["ema9"] and last["vwap"] < last["ema9"]: sell+=2.5; sr.append("VWAP X 9 DN")
+        if prev["vwap"] > prev["ema15"] and last["vwap"] < last["ema15"]: sell+=2.5; sr.append("VWAP X 15 DN")
+        if last["vwap"] > last["ema9"] > last["ema15"]: buy+=3.5; br.append("VWAP>9>15 SUPER BUY")
+        if last["vwap"] < last["ema9"] < last["ema15"]: sell+=3.5; sr.append("VWAP<9<15 SUPER SELL")
+        # 12. GREEN ONLY + BOUNCE (V15)
+        if o5 and c5>o5 and dg<0 and rec>=1.0: buy+=2.0; br.append("Green+ Bounce")
+
+        if v20<0.6 and abs(dg)<0.8: return None
+
+        if buy>=3.0 and buy>sell+0.5:
+            sl,t1,t2,slp=get_sl(ltp,"BUY",df)
+            return {"side":"BUY","symbol":sym,"entry":ltp,"sl":sl,"t1":t1,"t2":t2,"slp":slp,"reason":"|".join(br),"score":buy}
+        if sell>=3.0 and sell>buy+0.5:
+            sl,t1,t2,slp=get_sl(ltp,"SELL",df)
+            return {"side":"SELL","symbol":sym,"entry":ltp,"sl":sl,"t1":t1,"t2":t2,"slp":slp,"reason":"|".join(sr),"score":sell}
+    except: return None
+
+# ===== FAST 30 THREADS =====
+found=[]
+start=datetime.now()
+with ThreadPoolExecutor(max_workers=30) as ex:
+    fut={ex.submit(scan_one, s): s for s in ALL_SYMBOLS}
+    for f in as_completed(fut):
+        r=f.result()
+        if r:
+            found.append(r)
+            tg(f"🚀 NEW {r['side']} {r['symbol']} @{r['entry']} SL {r['sl']}({r['slp']}%) T1 {r['t1']} T2 {r['t2']} | {r['reason']} S:{r['score']:.1f}")
+            if len(found)>=8: break
+
+elapsed=(datetime.now()-start).total_seconds()
+tg(f"📊 END DAY {datetime.now().date()} W0 L0 Net ₹0 🔴 Trades {len(found)}/8 | FAST {elapsed:.0f}s | v22 ALL COND BUY+SELL")
+print(f"DONE FAST {elapsed:.0f}s - {len(found)} signals")
