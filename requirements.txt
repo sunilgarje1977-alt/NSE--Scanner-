@@ -1,4 +1,8 @@
-SmartApi-python
-pyotp
+lyfinance
 pandas
 requests
+SmartApi-python
+logzero
+pyotp
+websocket-client
+pycryptodome
