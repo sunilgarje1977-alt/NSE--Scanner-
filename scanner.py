@@ -1,347 +1,180 @@
-import requests, json, os, pyotp, concurrent.futures
+import os, json, time, requests, pyotp, pandas as pd
 from SmartApi import SmartConnect
-import pandas as pd
 from datetime import datetime, timedelta
-import numpy as np
 
-STATE_FILE = "active_trades.json"
-PNL_FILE = "pnl_history.json"
+# ================= CONFIG =================
+API_KEY = os.getenv("ANGEL_API_KEY","").strip()
+CLIENT_ID = os.getenv("ANGEL_CLIENT_ID","").strip()
+PASSWORD = os.getenv("ANGEL_PASSWORD","")
+TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET","").strip().replace(" ","").upper()
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN","")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID","")
+
+MAX_TRADES = 8
 MAX_ACTIVE = 2
-DAILY_TARGET = 8
+SL_PCT = 0.75
 
-def load_state():
+# RESULT / CORP ACTION - आता SKIP नाही, CATCH करायचा!
+RESULT_TODAY = [] # ["TCS","INFY"] - असला तरी Trade घेणार, Bonus Score मिळणार
+CORP_ACTION_TODAY = []
+
+ACTIVE = []
+CLOSED = []
+TOTAL = 0
+
+# 1000 LIST - कालचीच
+data = """RELIANCE TCS HDFCBANK ICICIBANK INFY ITC SBIN BHARTIARTL LT BAJFINANCE MARUTI TITAN SUNPHARMA WIPRO ULTRACEMCO NTPC POWERGRID TATAMOTORS TATASTEEL JSWSTEEL HCLTECH BAJAJFINSV ASIANPAINT ONGC ADANIENT ADANIPORTS COALINDIA GRASIM HINDALCO HINDUNILVR CIPLA DIVISLAB DRREDDY EICHERMOT BPCL BRITANNIA HEROMOTOCO ICICIPRULI SBILIFE HDFCLIFE LTIM TRENT VEDL INDUSINDBK AXISBANK KOTAKBANK BAJAJ-AUTO APOLLOHOSP TATACONSUM NESTLEIND JSWENERGY NHPC SJVN GMRINFRA IDFCFIRSTB FEDERALBNK AUBANK INDIANB BANKINDIA UNIONBANK CANBK MAHABANK PNB BANKBARODA RECLTD PFC IRFC RVNL IRCTC HAL BEL BHEL SAIL TATAPOWER ADANIGREEN ADANIPOWER IDEA YESBANK SUZLON JIOFIN ZOMATO NYKAA PAYTM POLICYBZR DELHIVERY NAUKRI INDIAMART LTF MUTHOOTFIN MANAPPURAM CHOLAFIN SHRIRAMFIN TATACHEM DEEPAKNTR AARTIIND ATUL SRF PIIND UPL COROMANDEL TORRENT POWER TORNTPHARM ALKEM AUROPHARMA LUPIN BIOCON ABB SIEMENS CUMMINSIND VOLTAS DIXON TATATECH TATAELXSI KPITTECH COFORGE PERSISTENT MPHASIS LTTS IEX MCX BSE CAMS CDSL ANGELONE ICICIGI SBICARD HUDCO IREDA IRB DLF GODREJPROP DMART POLYCAB HAVELLS INDHOTEL M&M TVSMOTOR MOTHERSON MRF MAZDOCK BDL"""
+extra_list = """AARTIDRUGS AAVAS ABSLAMC AFFLE AIAENG AJANTPHARM AKZOINDIA ALEMBICLTD ALKYLAMINE ALOKINDS ANANDRATHI ANANTRAJ APARINDS APTUS ASAHIINDIA ASTERDM ASTRAL ATGL AVANTIFEED AWL BALAMINES BANDHANBNK BAYERCROP BBTC BLUEDART BSOFT CANFINHOME CAPLIPOINT CARBORUN CASTROLIND CCL CEATLTD CENTRALBK CERA CGCL CRAFTSMAN CREDITACC CRISIL CSBBANK CUB CYIENT DABUR DALBHARAT DCAL DCBBANK EASEMYTRIP ELGIEQUIP EMAMILTD EQUITASBNK ERIS EXIDEIND FINEORG FINCABLES FSL GALAXYSURF GESHIP GILLETTE GLAXO GLENMARK GMDCLTD GODREJCP GRANULES GRAPHITE GRINDWELL GUJALKALI GUJGASLTD HAPPSTMNDS HONASA IIFL INTELLECT IOC ISEC JBCHEPHARM JINDALSAW JUBLINGREA JUSTDIAL JYOTHYLAB KAJARIA KARURVYSYA KEC KIRLOSENG KRBL KSB KTKBANK LALPATHLAB LATENTVIEW MAPMYINDIA MARICO MASTEK MAXHEALTH MEDANTA METROPOLIS MGL NAVINFLUOR NCC NETWEB NH OFSS PATANJALI PETRONET PFIZER PIDILITIND PNCINFRA POLYMED PRAJIND PRINCEPIPE PVRINOX QUESS RADICO RAILTEL RALLIS RAMCOCEM RATNAMANI RAYMOND RBLBANK RELAXO SAPPHIRE SCHAEFFLER SEQUENT SHANKARA SHREECEM SKFINDIA SOLARINDS STAR STLTECH"""
+ALL_SYMBOLS = list(dict.fromkeys((data+" "+extra_list).replace("\n"," ").split()))
+
+def tg(msg):
     try:
-        with open(STATE_FILE,"r") as f: return json.load(f)
-    except: return {"active":[],"pending":[],"today_count":0,"today_date":""}
-def save_state(a,p,count,date):
-    with open(STATE_FILE,"w") as f: json.dump({"active":a,"pending":p,"today_count":count,"today_date":date}, f)
-def load_pnl():
-    try:
-        with open(PNL_FILE,"r") as f: return json.load(f)
-    except: return []
-def save_pnl(d):
-    with open(PNL_FILE,"w") as f: json.dump(d[-1000:], f)
-def send_tg(tok,cid,msg):
-    try: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", data={"chat_id":cid,"text":msg}, timeout=20)
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id":CHAT_ID,"text":msg,"parse_mode":"Markdown"})
     except: pass
+    print(msg)
+
+obj = SmartConnect(api_key=API_KEY)
+totp = pyotp.TOTP(TOTP_SECRET).now()
+obj.generateSession(CLIENT_ID, PASSWORD, totp)
 
 def get_token_map():
-    d = requests.get("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json", timeout=20).json()
-    mp={}
-    for i in d:
-        if i.get("exch_seg")=="NSE" and i.get("symbol"):
-            sym=i["symbol"].replace("-EQ","").strip()
-            if len(sym)>=2 and sym not in mp: mp[sym]=i["token"]
-    return mp
+    try:
+        df=pd.read_json("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json")
+        m={}
+        for _,r in df.iterrows():
+            if r['exch_seg']=='NSE' and str(r['symbol']).endswith('-EQ'):
+                sym=r['symbol'].replace('-EQ','')
+                if sym in ALL_SYMBOLS: m[sym]=str(r['token'])
+        return m
+    except: return {}
 TOKEN_MAP = get_token_map()
 
-def get_nifty_trend(obj):
-    try:
-        token="99926000"
-        today=datetime.now()
-        from_d=(today-timedelta(days=1)).strftime("%Y-%m-%d 09:15")
-        to_d=today.strftime("%Y-%m-%d 15:30")
-        data=obj.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":from_d,"todate":to_d})
-        if data and "data" in data and len(data["data"])>20:
-            c=[x[4] for x in data["data"]]
-            ema20=pd.Series(c).ewm(20).mean().iloc[-1]
-            return "UP" if c[-1]>ema20 else "DOWN"
-    except: return "UP"
-    return "UP"
+def indi(df):
+    c=df["close"]
+    df["ema9"]=c.ewm(9).mean(); df["ema15"]=c.ewm(15).mean(); df["ema21"]=c.ewm(21).mean(); df["ema50"]=c.ewm(50).mean()
+    df["vwap"]=(df["close"]*df["volume"]).cumsum()/df["volume"].cumsum()
+    df["macd"]=c.ewm(12).mean()-c.ewm(26).mean(); df["macd_sig"]=df["macd"].ewm(9).mean()
+    d=c.diff(); g=d.where(d>0,0).rolling(14).mean(); l=-d.where(d<0,0).rolling(14).mean()
+    df["rsi"]=100-(100/(1+g/l)); df["vol20"]=df["volume"].rolling(20).mean()
+    return df
 
-TRUE_SMALL_MID = set(["PRAJIND","DAMCAPITAL","RSYSTEMS","SMCGLOBAL","SYNCOMF","SDBL","ZENSAR","VBL","NBCC","KPITTECH","RAILTEL","IRCON","MAZAGON","TITAGARH","JWL","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","IDEA","NHPC","SJVN","SAIL","COCHINSHIP","HUDCO","BEML","BHEL","PFC","RECLTD","IREDA","RVNL","IRFC","BSE","MCX","DIXON","KAYNES","POLYCAB","COFORGE","PERSISTENT","GRSE","BEL","HAL"])
+def get_signal(df, sym, ltp, dh, dl, do, pc, news=""):
+    global TOTAL
+    if len(ACTIVE)>=MAX_ACTIVE or TOTAL>=MAX_TRADES or len(df)<30: return None
 
-PRIORITY = ["PRAJIND","COCHINSHIP","JWL","TITAGARH","GRSE","HUDCO","NBCC","ZENSAR","VBL","DAMCAPITAL","RSYSTEMS","SMCGLOBAL","SYNCOMF","SDBL","RVNL","IRFC","BEML","BHEL","PFC","RECLTD","IREDA","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","IDEA","BSE","MCX","DIXON","KAYNES","POLYCAB","COFORGE","PERSISTENT","NHPC","SJVN","NMDC","SAIL","KPITTECH","RAILTEL","IRCON","MAZAGON","BHARTIARTL","SBIN","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","ITC","LT","KOTAKBANK","BAJFINANCE","AXISBANK","MARUTI","TITAN","SUNPHARMA"]
+    gap=(do-pc)/pc*100 if pc else 0
+    if abs(gap)>5: return None
+    if df["volume"].iloc[-20:].mean()<50000: return None
+    if any(k in news.lower() for k in ["fraud","scam","ban","default"]): return None
 
-all_syms=[]
-for s in PRIORITY:
-    if s in TOKEN_MAP and s not in all_syms: all_syms.append(s)
-for s in sorted(TOKEN_MAP.keys()):
-    if s not in all_syms and len(all_syms)<1000:
-        if 3<=len(s)<=15: all_syms.append(s)
-    if len(all_syms)>=1000: break
-all_syms=all_syms[:1000]
+    df=indi(df); last=df.iloc[-1]
+    dg=(ltp-do)/do*100 if do else 0
+    m5=(df["close"].iloc[-1]-df["close"].iloc[-2])/df["close"].iloc[-2]*100
+    rec=(ltp-dl)/dl*100 if dl else 0
+    v20=df["volume"].iloc[-1]/df["vol20"].iloc[-1] if df["vol20"].iloc[-1]>0 else 1
+    v5=df["volume"].iloc[-1]/df["volume"].iloc[-6:-1].mean() if len(df)>6 else 1
 
-cat_map={}
-for s in all_syms:
-    if s in TRUE_SMALL_MID:
-        if s in ["PRAJIND","DAMCAPITAL","RSYSTEMS","SMCGLOBAL","SYNCOMF","SDBL","ZENSAR","VBL","SUZLON","ZOMATO","YESBANK","IEX","PAYTM","IDEA"]: cat_map[s]="SMALL"
-        else: cat_map[s]="MID"
-    else:
-        idx = all_syms.index(s)
-        if idx < 150: cat_map[s]="LARGE"
-        elif idx < 500: cat_map[s]="MID"
-        else: cat_map[s]="SMALL"
+    buy=0; sell=0; br=[]; sr=[]
 
-SCAN_LIST = all_syms
-WORKERS = 60
+    # RESULT / CORP ACTION - BONUS, NOT SKIP
+    if sym in RESULT_TODAY and v20>=2:
+        buy+=3.0; sell+=3.0; br.append("RESULT DAY BONUS"); sr.append("RESULT DAY BONUS")
+    if sym in CORP_ACTION_TODAY:
+        buy+=1.5; sell+=1.5; br.append("CORP BONUS"); sr.append("CORP BONUS")
 
-def supertrend_dir(c,h,l, period=10, mult=3):
-    try:
-        hl2=(np.array(h)+np.array(l))/2
-        atr=pd.Series(np.array(h)-np.array(l)).rolling(period).mean().values
-        atr=np.nan_to_num(atr, nan=0.01)
-        up=hl2+mult*atr; dn=hl2-mult*atr
-        dirc=1
-        for i in range(1,len(c)):
-            if c[i]<dn[i-1]: dirc=-1
-            elif c[i]>up[i-1]: dirc=1
-        return dirc
-    except: return 1
+    if last["ema9"]>last["ema15"]>last["ema21"]: buy+=1.5; br.append("TREND UP")
+    if last["ema9"]<last["ema15"]<last["ema21"]: sell+=1.5; sr.append("TREND DN")
+    if ltp>last["ema50"]: buy+=0.5
+    else: sell+=0.5
+    if ltp>last["vwap"]: buy+=1.2; br.append("VWAP+")
+    else: sell+=1.2; sr.append("VWAP-")
+    if last["macd"]>last["macd_sig"]: buy+=1.2
+    else: sell+=1.2
+    if 55<=last["rsi"]<=70: buy+=1.0; br.append(f"RSI {last['rsi']:.0f}")
+    if 40<=last["rsi"]<=55: sell+=1.0; sr.append(f"RSI {last['rsi']:.0f}")
+    if dg>=0.5: buy+=1.2; br.append(f"DAY+{dg:.1f}%")
+    if dg<=-0.5: sell+=1.2; sr.append(f"DAY{dg:.1f}%")
+    if m5>=0.15: buy+=1.0; br.append(f"5M+{m5:.2f}%")
+    if m5<=-0.15: sell+=1.0; sr.append(f"5M{m5:.2f}%")
+    if ltp>=dh*0.994: buy+=1.2; br.append("NEAR HIGH")
+    if rec>=1.0: buy+=1.0; br.append(f"REC {rec:.1f}%")
+    if v20>=2.5: buy+=2.5 if dg>0 else 0; sell+=2.5 if dg<0 else 0; br.append(f"VOL {v20:.1f}x")
+    if v5>=2.0: buy+=1.5 if dg>0 else 0; sell+=1.5 if dg<0 else 0
+    if ltp>=dh*0.992 and v5>=2.0: buy+=3.5; br.append("52W-H BLAST")
+    if ltp<=dl*1.008 and v5>=2.0: sell+=3.5; sr.append("52W-L BLAST")
 
-def fast_analyze(args):
-    sym,obj,from_d,to_d,nifty_trend=args
-    token=TOKEN_MAP.get(sym)
-    if not token: return None
-    try:
-        data=obj.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":from_d,"todate":to_d})
-        if not data or "data" not in data or not data["data"] or len(data["data"])<35: return None
-        d=data["data"]
-        closes=[x[4] for x in d]; opens=[x[1] for x in d]; highs=[x[2] for x in d]; lows=[x[3] for x in d]; vols=[x[5] for x in d]
-        c=np.array(closes,float); h=np.array(highs,float); l=np.array(lows,float)
-        def ema(arr,span):
-            a=2/(span+1); e=np.zeros_like(arr); e[0]=arr[0]
-            for i in range(1,len(arr)): e[i]=a*arr[i]+(1-a)*e[i-1]
-            return e
-        ema9=ema(c,9); ema15=ema(c,15); ema20=ema(c,20)
-        vwap=np.cumsum(c*np.array(vols))/np.cumsum(np.array(vols))
-        delta=np.diff(c,prepend=c[0]); gain=np.where(delta>0,delta,0); loss=np.where(delta<0,-delta,0)
-        avg_gain=pd.Series(gain).rolling(14).mean().values; avg_loss=pd.Series(loss).rolling(14).mean().values
-        rsi=100-(100/(1+avg_gain/(avg_loss+1e-9)))
-        ema12=ema(c,12); ema26=ema(c,26); macd=ema12-ema26; macd_sig=ema(macd,9)
-        vol_avg=pd.Series(vols).rolling(20).mean().values
-        atr=pd.Series(h-l).rolling(14).mean().values
-        st_dir=supertrend_dir(c,h,l)
-        ltp=float(c[-1]); prev_c=float(c[-2]); last_o=float(opens[-1]); prev_o=float(opens[-2])
-        atr_last=float(atr[-1]) if atr[-1]==atr[-1] else ltp*0.008
-        orb_high=max(highs[:6]) if len(highs)>=6 else max(highs)
-        orb_low=min(lows[:6]) if len(lows)>=6 else min(lows)
-        body=abs(ltp-last_o); rng=max(highs[-1],last_o)-min(lows[-1],last_o)+1e-9
-        wick_pct=1-(body/rng)
-        day_low = min(lows); day_high = max(highs); day_open = opens[0]
-        recovery_pct = ((ltp - day_low) / (day_low+1e-9)) * 100
-        fall_from_high = ((day_high - ltp) / (day_high+1e-9)) * 100
-        last_5m_chg = ((closes[-1] - closes[-2]) / (closes[-2]+1e-9)) * 100
-        day_gain_pct = ((ltp - day_open) / (day_open+1e-9)) * 100
-        vol_avg_20=float(vol_avg[-1]) if vol_avg[-1]==vol_avg[-1] else 1
-        volx = vols[-1]/vol_avg_20 if vol_avg_20>0 else 1
-        cat=cat_map.get(sym,"SMALL")
-        is_small_mid = cat in ["SMALL","MID"]
-        if is_small_mid:
-            if wick_pct>0.88: return None
-        else:
-            if wick_pct>0.75: return None
-        last_10_high = max(highs[-10:-1]) if len(highs)>=11 else max(highs[:-1])
-        last_10_low = min(lows[-10:-1]) if len(lows)>=11 else min(lows[:-1])
-        buy=0; sell=0; bc=[]; sc=[]
-        if ltp>last_o and prev_c<prev_o and (ltp-last_o)>(prev_o-prev_c)*0.7: buy+=1; bc.append("ENG")
-        if ltp<last_o and prev_c>prev_o and (last_o-ltp)>(prev_c-prev_o)*0.7: sell+=1; sc.append("ENG")
-        if ema9[-2]<ema15[-2] and ema9[-1]>ema15[-1]: buy+=1; bc.append("9x15")
-        if ema9[-2]>ema15[-2] and ema9[-1]<ema15[-1]: sell+=1; sc.append("9x15")
-        if c[-3]<c[-2]<c[-1] and c[-1]>ema9[-1]: buy+=1; bc.append("3C")
-        if c[-3]>c[-2]>c[-1] and c[-1]<ema9[-1]: sell+=1; sc.append("3C")
-        if ema9[-1]>vwap[-1] and ltp>vwap[-1]: buy+=1; bc.append("VW+")
-        if ema9[-1]<vwap[-1] and ltp<vwap[-1]: sell+=1; sc.append("VW-")
-        if ltp>ema20[-1] and ema20[-1]>ema20[-2]: buy+=1; bc.append("E20U")
-        if ltp<ema20[-1] and ema20[-1]<ema20[-2]: sell+=1; sc.append("E20D")
-        rsi_val=float(rsi[-1]) if rsi[-1]==rsi[-1] else 50
-        if 50<=rsi_val<=70: buy+=1; bc.append(f"RSI-B {int(rsi_val)}")
-        if 28<=rsi_val<=50: sell+=1.2; sc.append(f"RSI-S {int(rsi_val)}")
-        if macd[-1]>macd_sig[-1]: buy+=1; bc.append("MACD+")
-        if macd[-1]<macd_sig[-1]: sell+=1; sc.append("MACD-")
-        last_5_high=max(highs[-5:]); last_5_low=min(lows[-5:])
-        if vols[-1]>vol_avg_20*1.0 and ltp>=last_5_high*0.998: buy+=1.2; bc.append(f"VOL-BO {volx:.1f}x")
-        if vols[-1]>vol_avg_20*1.0 and ltp<=last_5_low*1.002: sell+=1.2; sc.append(f"VOL-BD {volx:.1f}x")
-        if ltp > last_10_high * 1.0005:
-            if volx>=0.9: buy+=2.8; bc.append(f"5m-BO {((ltp-last_10_high)/last_10_high*100):.1f}%")
-            else: buy+=1.5; bc.append("5m-BO")
-        if ltp < last_10_low * 0.9995:
-            if volx>=0.9: sell+=2.8; sc.append(f"5m-BD {((last_10_low-ltp)/ltp*100):.1f}%")
-            else: sell+=1.5; sc.append("5m-BD")
-        if ltp > orb_high * 1.001: buy+=2.0; bc.append(f"ORB-BO {((ltp-orb_high)/orb_high*100):.1f}%")
-        if ltp < orb_low * 0.999: sell+=2.0; sc.append(f"ORB-BD {((orb_low-ltp)/orb_low*100):.1f}%")
-        if st_dir==1 and ltp>orb_high: buy+=1; bc.append("ST+ORB")
-        if st_dir==-1 and ltp<orb_low: sell+=1; sc.append("ST+ORB")
+    if v20<0.6 and abs(dg)<0.8: return None
+    side=None; score=0; reason=[]
+    if buy>=3.0 and buy>sell+0.5: side="BUY"; score=buy; reason=br
+    elif sell>=3.0 and sell>buy+0.5: side="SELL"; score=sell; reason=sr
+    else: return None
 
-        if is_small_mid:
-            nifty_down_bonus = 1.5 if nifty_trend=="DOWN" and day_gain_pct>0 else 0
-            if day_gain_pct >= 0.1:
-                if day_gain_pct >= 0.5: buy+=2.5; bc.append(f"SM-DAY+ {day_gain_pct:.1f}%")
-                else: buy+=1.0; bc.append(f"DAY+ {day_gain_pct:.1f}%")
-                if last_5m_chg >= 0.10: buy+=1.2; bc.append(f"S-MOM {last_5m_chg:.1f}%")
-                if ltp >= day_high*0.994: buy+=1.0; bc.append("NEAR-HIGH")
-                if recovery_pct >= 0.8: buy+=1.0; bc.append(f"RECOV {recovery_pct:.1f}%")
-                if nifty_down_bonus>0: buy+=nifty_down_bonus; bc.append(f"VS-NIFTY+{nifty_down_bonus}")
+    cl=df["low"].iloc[-3:].min(); ch=df["high"].iloc[-3:].max()
+    fsl_b=ltp*(1-SL_PCT/100); fsl_s=ltp*(1+SL_PCT/100)
+    if side=="BUY": sl=max(cl,fsl_b); slp=(ltp-sl)/ltp*100; t1=ltp*(1+slp/100); t2=ltp*(1+slp*1.5/100)
+    else: sl=min(ch,fsl_s); slp=(sl-ltp)/ltp*100; t1=ltp*(1-slp/100); t2=ltp*(1-slp*1.5/100)
+
+    return {"symbol":sym,"side":side,"score":score,"entry":ltp,"sl":round(sl,2),"t1":round(t1,2),"t2":round(t2,2),"sl_pct":round(slp,2),"qty":100,"remain":100,"booked":0,"status":"ACTIVE","reason":" | ".join(reason)}
+
+def manage(mp):
+    for tr in ACTIVE[:]:
+        ltp=mp.get(tr["symbol"], tr["entry"])
+        profit_pct = (ltp-tr["entry"])/tr["entry"]*100 if tr["side"]=="BUY" else (tr["entry"]-ltp)/tr["entry"]*100
+
+        if tr["status"]=="ACTIVE":
+            hit=(tr["side"]=="BUY" and ltp>=tr["t1"]) or (tr["side"]=="SELL" and ltp<=tr["t1"])
+            if hit:
+                b=tr["remain"]//2; p=(ltp-tr["entry"])*b if tr["side"]=="BUY" else (tr["entry"]-ltp)*b
+                tr["remain"]-=b; tr["booked"]+=p; tr["sl"]=tr["entry"]; tr["status"]="50% TRAIL"
+                tg(f"✅ 50% BOOKED {tr['symbol']} {tr['side']} +₹{p:.0f} | SL->ENTRY | Rem {tr['remain']}")
+
+        # 1:5 TRAILING LOGIC
+        if tr["status"]=="50% TRAIL" and profit_pct>0:
+            trail_factor = 5 # 1:5
+            trail_pct = profit_pct / trail_factor
+            if tr["side"]=="BUY":
+                new_sl = tr["entry"] * (1 + trail_pct/100)
+                if new_sl > tr["sl"]:
+                    tr["sl"]=new_sl
+                    tg(f"🔼 TRAIL {tr['symbol']} SL {new_sl:.2f} | Profit {profit_pct:.1f}% (1:5)")
             else:
-                # BOUNCE CASE - Day -1.5% ते 0% पण Recovery असेल तर Bullish
-                if last_5m_chg >= 0.5 and recovery_pct >= 1.0 and volx>=0.8:
-                    buy+=2.2; bc.append(f"BOUNCE {recovery_pct:.1f}%/{last_5m_chg:.1f}%")
-                if ltp >= day_low*1.012 and last_5m_chg >= 0.3:
-                    buy+=1.0; bc.append("LOW-BOUNCE")
+                new_sl = tr["entry"] * (1 - trail_pct/100)
+                if new_sl < tr["sl"]:
+                    tr["sl"]=new_sl
+                    tg(f"🔽 TRAIL {tr['symbol']} SL {new_sl:.2f} | Profit {profit_pct:.1f}% (1:5)")
 
-            if day_gain_pct <= -0.2:
-                if day_gain_pct <= -0.5: sell+=2.5; sc.append(f"SM-DAY- {day_gain_pct:.1f}%")
-                else: sell+=1.0; sc.append(f"DAY- {day_gain_pct:.1f}%")
-                if last_5m_chg <= -0.10: sell+=1.2; sc.append(f"S-DN {last_5m_chg:.1f}%")
-                if fall_from_high >= 0.8: sell+=1.0; sc.append(f"FALL {fall_from_high:.1f}%")
+        sl_hit=(tr["side"]=="BUY" and ltp<=tr["sl"]) or (tr["side"]=="SELL" and ltp>=tr["sl"])
+        t2_hit=(tr["side"]=="BUY" and ltp>=tr["t2"]) or (tr["side"]=="SELL" and ltp<=tr["t2"])
+        if sl_hit or t2_hit:
+            pnl=(ltp-tr["entry"])*tr["remain"] if tr["side"]=="BUY" else (tr["entry"]-ltp)*tr["remain"]
+            total=tr["booked"]+pnl; rs="T2" if t2_hit else "TRAIL SL" if tr["status"]!="ACTIVE" else "SL"
+            CLOSED.append({"sym":tr["symbol"],"side":tr["side"],"pnl":total,"rs":rs,"sl":tr["sl_pct"]})
+            ACTIVE.remove(tr)
+            tg(f"{'🟢' if total>0 else '🔴'} CLOSED {tr['symbol']} {rs} ₹{total:.0f} | Active {len(ACTIVE)}/2")
 
-        if cat=="SMALL":
-            if buy>0: buy+=1.0; bc.append("S-BONUS")
-            if sell>0: sell+=1.0; sc.append("S-BONUS")
-        elif cat=="MID":
-            if buy>0: buy+=0.7; bc.append("M-BONUS")
-            if sell>0: sell+=0.7; sc.append("M-BONUS")
+def summary():
+    w=sum(1 for x in CLOSED if x["pnl"]>0); l=sum(1 for x in CLOSED if x["pnl"]<=0)
+    wp=sum(x["pnl"] for x in CLOSED if x["pnl"]>0); lp=sum(x["pnl"] for x in CLOSED if x["pnl"]<=0); net=wp+lp
+    msg=f"📊 *END DAY {datetime.now().strftime('%d-%b')}* | Trades {TOTAL}/8 | W{w} L{l} | Net ₹{net:.0f} {'🟢' if net>0 else '🔴'}\n\n"
+    for x in CLOSED: msg+=f"{'🟢' if x['pnl']>0 else '🔴'} {x['sym']} {x['side']} {x['rs']} ₹{x['pnl']:.0f} SL {x['sl']}%\n"
+    tg(msg)
 
-        buy_thresh = 1.8 if is_small_mid else 3.5
-        sell_thresh = 1.4 if is_small_mid else 3.0
-
-        # ===== v15 PERFECT BOUNCE FILTER =====
-        if is_small_mid:
-            if buy>=buy_thresh and day_gain_pct < -1.5:
-                # -1.5% पेक्षा जास्त पडला तरच Reject, पण Bounce असेल तर Allow
-                is_bounce = (last_5m_chg >= 0.5 and recovery_pct >= 1.0)
-                if not is_bounce:
-                    return None
-            if sell>=sell_thresh and day_gain_pct > 1.5:
-                is_drop = (last_5m_chg <= -0.5 and fall_from_high >= 1.0)
-                if not is_drop:
-                    return None
-
-        if buy>=buy_thresh:
-            sl=round(min(lows[-6:]),1)
-            return {"sym":sym,"side":"BUY","score":buy,"cat":cat,"ltp":ltp,"sl":sl,"t1":round(ltp+atr_last*1.5,1),"t2":round(ltp+atr_last*3,1),"trail":round(ltp-atr_last*1.2,1),"conds":bc,"atr":atr_last,"recov":recovery_pct,"day_chg":day_gain_pct,"last_5m":last_5m_chg,"volx":volx}
-        if sell>=sell_thresh:
-            sl=round(max(highs[-6:]),1)
-            return {"sym":sym,"side":"SELL","score":sell,"cat":cat,"ltp":ltp,"sl":sl,"t1":round(ltp-atr_last*1.5,1),"t2":round(ltp-atr_last*3,1),"trail":round(ltp+atr_last*1.2,1),"conds":sc,"atr":atr_last,"recov":fall_from_high,"day_chg":day_gain_pct,"last_5m":last_5m_chg,"volx":volx}
-    except: return None
-
-obj=SmartConnect(api_key=os.getenv("ANGEL_API_KEY","").strip())
-obj.generateSession(os.getenv("ANGEL_CLIENT_ID","").strip(), os.getenv("ANGEL_PASSWORD","").strip(), pyotp.TOTP(os.getenv("ANGEL_TOTP_SECRET","").strip()).now())
-today=datetime.now()
-from_d=(today-timedelta(days=1)).strftime("%Y-%m-%d 09:15"); to_d=today.strftime("%Y-%m-%d 15:30")
-nifty_trend=get_nifty_trend(obj)
-state=load_state(); pnl_hist=load_pnl()
-today_str=today.strftime("%Y-%m-%d")
-if state.get("today_date")!=today_str:
-    state["today_count"]=0; state["today_date"]=today_str; state["active"]=[]; state["pending"]=[]
-
-closed=[]; new_active=[]
-for trade in state.get("active",[]):
-    sym=trade.get("symbol"); token=TOKEN_MAP.get(sym)
-    if not token: new_active.append(trade); continue
+# MAIN LOOP
+for sym in ALL_SYMBOLS:
+    token=TOKEN_MAP.get(sym)
+    if not token: continue
     try:
-        data=obj.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":from_d,"todate":to_d})
-        if not data or "data" not in data: new_active.append(trade); continue
-        ltp=float(data["data"][-1][4]); entry=float(trade.get("price",ltp)); trail_sl=float(trade.get("trail_sl",trade.get("sl",entry))); atr=float(trade.get("atr",ltp*0.01))
-        side=trade.get("side"); highest=float(trade.get("highest",entry)); lowest=float(trade.get("lowest",entry)); t1=float(trade.get("t1",entry))
-        if side=="BUY":
-            if ltp>highest: highest=ltp
-            if ltp>=t1 and trail_sl<entry: trail_sl=entry
-            if ltp>=t1:
-                nt=round(ltp-atr*1.2,1)
-                if nt>trail_sl: trail_sl=nt
-            if ltp<=trail_sl:
-                pnl=trail_sl-entry; closed.append({"symbol":sym,"side":side,"status":"TRAIL_SL","pnl":round(pnl,2),"entry":entry,"exit":trail_sl})
-                pnl_hist.append({"date":today_str,"symbol":sym,"pnl":round(pnl,2),"status":"TRAIL_SL","time":today.strftime("%H:%M")}); continue
-        else:
-            if ltp<lowest or lowest==0: lowest=ltp
-            if ltp<=t1 and trail_sl>entry: trail_sl=entry
-            if ltp<=t1:
-                nt=round(ltp+atr*1.2,1)
-                if nt<trail_sl: trail_sl=nt
-            if ltp>=trail_sl:
-                pnl=entry-trail_sl; closed.append({"symbol":sym,"side":side,"status":"TRAIL_SL","pnl":round(pnl,2),"entry":entry,"exit":trail_sl})
-                pnl_hist.append({"date":today_str,"symbol":sym,"pnl":round(pnl,2),"status":"TRAIL_SL","time":today.strftime("%H:%M")}); continue
-        trade["ltp"]=ltp; trade["trail_sl"]=trail_sl; trade["highest"]=highest; trade["lowest"]=lowest; new_active.append(trade)
-    except: new_active.append(trade)
+        params={"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":(datetime.now()-timedelta(days=2)).strftime("%Y-%m-%d 09:15"),"todate":datetime.now().strftime("%Y-%m-%d %H:%M")}
+        c=obj.getCandleData(params)
+        if not c.get('data'): continue
+        df=pd.DataFrame(c['data'], columns=['date','open','high','low','close','volume'])
+        ltp=df["close"].iloc[-1]; dh=df["high"].iloc[-1]; dl=df["low"].iloc[-1]; do=df["open"].iloc[-1]; pc=df["close"].iloc[-2]
+        sig=get_signal(df,sym,ltp,dh,dl,do,pc,"")
+        if sig:
+            ACTIVE.append(sig); TOTAL+=1
+            tg(f"🚀 NEW {sig['side']} {sig['symbol']} @ {sig['entry']} SL {sig['sl']}({sig['sl_pct']}%) T1 {sig['t1']} T2 {sig['t2']} | {sig['reason']}")
+    except: continue
 
-results=[]
-with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as ex:
-    futs=[ex.submit(fast_analyze,(s,obj,from_d,to_d,nifty_trend)) for s in SCAN_LIST]
-    for f in concurrent.futures.as_completed(futs):
-        r=f.result()
-        if r: results.append(r)
-
-def get_top(cat,side,exclude=[]):
-    filt=[x for x in results if x["cat"]==cat and x["side"]==side and x["sym"] not in exclude]
-    if not filt: return None
-    return sorted(filt, key=lambda x: x["score"], reverse=True)[0]
-
-existing_syms=[a["symbol"] for a in new_active]+[c["symbol"] for c in closed]
-final_trades=[]
-for combo in [("SMALL","BUY"),("MID","BUY"),("SMALL","SELL"),("MID","SELL"),("SMALL","BUY"),("MID","BUY"),("SMALL","BUY"),("MID","SELL")]:
-    if len(final_trades)>=DAILY_TARGET: break
-    t=get_top(combo[0],combo[1],existing_syms+[x["sym"] for x in final_trades])
-    if t: final_trades.append(t)
-
-if len(final_trades)<4:
-    for combo in [("LARGE","BUY"),("LARGE","SELL")]:
-        t=get_top(combo[0],combo[1],existing_syms+[x["sym"] for x in final_trades])
-        if t: final_trades.append(t)
-
-today_count=state.get("today_count",0)+len(closed)
-combined_active=new_active[:]
-pending=state.get("pending",[])
-while len(combined_active)<MAX_ACTIVE and (pending or final_trades):
-    if pending: nxt=pending.pop(0)
-    else:
-        nxt=final_trades.pop(0)
-        nxt={"symbol":nxt["sym"],"side":nxt["side"],"cat":nxt["cat"],"price":nxt["ltp"],"sl":nxt["sl"],"t1":nxt["t1"],"t2":nxt["t2"],"trail_sl":nxt["sl"],"highest":nxt["ltp"],"lowest":nxt["ltp"],"atr":nxt["atr"],"time":today.strftime("%H:%M"),"score":nxt["score"]}
-    if not any(a["symbol"]==nxt["symbol"] for a in combined_active):
-        if today_count<DAILY_TARGET:
-            combined_active.append(nxt); today_count+=1
-        else: pending.append(nxt)
-
-for x in final_trades:
-    if len(pending)<6:
-        pending.append({"symbol":x["sym"],"side":x["side"],"cat":x["cat"],"price":x["ltp"],"sl":x["sl"],"t1":x["t1"],"t2":x["t2"],"trail_sl":x["sl"],"highest":x["ltp"],"lowest":x["ltp"],"atr":x["atr"],"time":today.strftime("%H:%M"),"score":x["score"]})
-
-combined_active=combined_active[:MAX_ACTIVE]
-save_state(combined_active,pending,today_count,today_str); save_pnl(pnl_hist)
-
-today_pnl=sum([p["pnl"] for p in pnl_hist if p["date"]==today_str]); total_pnl=sum([p["pnl"] for p in pnl_hist])
-win_today=len([p for p in pnl_hist if p["date"]==today_str and p["pnl"]>0]); loss_today=len([p for p in pnl_hist if p["date"]==today_str and p["pnl"]<0])
-
-buy_res=[r for r in results if r["side"]=="BUY"]
-sell_res=[r for r in results if r["side"]=="SELL"]
-
-msg=f"⚡ v15 BOUNCE | SMALL+MID + 5m BO + TARGET | Nifty:{nifty_trend} | {today.strftime('%H:%M:%S')}\n"
-msg+=f"Scan 1000/1000 | Found {len(results)} (B:{len(buy_res)} S:{len(sell_res)}) | Daily {today_count}/{DAILY_TARGET}\n"
-msg+=f"L:{len([x for x in results if x['cat']=='LARGE'])} M:{len([x for x in results if x['cat']=='MID'])} S:{len([x for x in results if x['cat']=='SMALL'])}\n"
-msg+="--------------------------------\n"
-
-if buy_res:
-    top_buy=sorted(buy_res, key=lambda x: x["day_chg"], reverse=True)[:6]
-    msg+=f"🔥 BULLISH ({len(buy_res)}):\n"
-    for b in top_buy:
-        msg+=f"{b['sym']}({b['cat']}) P:{b['ltp']} Chg:{b['day_chg']:.1f}% 5m:{b['last_5m']:.1f}% | {','.join(b['conds'][:2])}\n"
-    msg+="--------------------------------\n"
-
-if sell_res:
-    top_sell=sorted(sell_res, key=lambda x: x["day_chg"])[:4]
-    msg+=f"🔻 BEARISH ({len(sell_res)}):\n"
-    for b in top_sell:
-        msg+=f"{b['sym']}({b['cat']}) P:{b['ltp']} Chg:{b['day_chg']:.1f}% | {','.join(b['conds'][:2])}\n"
-    msg+="--------------------------------\n"
-
-if closed:
-    msg+=f"📊 CLOSED ({len(closed)}):\n"
-    for c in closed: msg+=f"{c['side']} {c['symbol']} PnL:{c['pnl']}\n"
-    msg+="--------------------------------\n"
-
-msg+=f"🔄 ACTIVE ({len(combined_active)}/{MAX_ACTIVE}):\n"
-for a in combined_active:
-    sc = round(float(a.get('score',0)),1)
-    msg+=f"{a['side']} {a['symbol']}({a.get('cat','')}) E:{a['price']} LTP:{a.get('ltp','')}\n"
-    msg+=f" 🎯 T1:{a.get('t1')} T2:{a.get('t2')} SL:{a.get('trail_sl')} S:{sc}\n"
-msg+="--------------------------------\n"
-if pending:
-    msg+=f"⏳ PENDING ({len(pending)}):\n"
-    for p in pending[:3]:
-        msg+=f"{p['side']} {p['symbol']}({p['cat']}) E:{p['price']} T1:{p['t1']} T2:{p['t2']} SL:{p['sl']}\n"
-    msg+="--------------------------------\n"
-msg+=f"📈 TODAY: {today_pnl:.2f} | TOTAL: {total_pnl:.2f} | W:{win_today} L:{loss_today}\n"
-msg+=f"v15: BOUNCE ON | Day -1.5% + Recovery=BUY | Green Only + Bounce | T1/T2\n"
-
-send_tg(os.getenv("TELEGRAM_BOT_TOKEN","").strip(), os.getenv("TELEGRAM_CHAT_ID","").strip(), msg)
-print(msg)
+# Live manage example
+# manage(live_prices_dict)
+summary()
