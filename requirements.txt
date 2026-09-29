@@ -1,9 +1,4 @@
-requests
-pandas
-pyotp
 SmartApi-python
-numpy
-logzero
-python-dateutil
-websocket-client
-pytz
+pyotp
+pandas
+requests
