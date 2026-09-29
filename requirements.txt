@@ -1,4 +1,4 @@
-lyfinance
+yfinance
 pandas
 requests
 SmartApi-python
