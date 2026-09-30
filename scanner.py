@@ -54,4 +54,49 @@ for sym in STOCKS:
 
         # पहिलाच result घे
         token = search['data'][0]['symboltoken']
-        tradingsym = search
+        tradingsym = search['data'][0]['tradingsymbol']
+        print(f"{sym} -> Token: {token} Symbol: {tradingsym}")
+
+        ltp_data = smart.ltpData("NSE", tradingsym, token)
+        ltp = float(ltp_data['data']['ltp'])
+        print(f"{sym} LTP: {ltp}")
+
+        # 15M Candle
+        start = today.replace(hour=9, minute=15, second=0, microsecond=0)
+        params = {
+            "exchange": "NSE",
+            "symboltoken": token,
+            "interval": "FIFTEEN_MINUTE",
+            "fromdate": start.strftime("%Y-%m-%d %H:%M"),
+            "todate": today.strftime("%Y-%m-%d %H:%M")
+        }
+        candles = smart.getCandleData(params)
+        data = candles.get('data', [])
+        if len(data) < 10:
+            print(f"{sym} No Candle")
+            continue
+
+        closes = [float(c[4]) for c in data]
+        rsi = calc_rsi(closes)
+        prev_high = float(data[-2][2])
+        prev_low = float(data[-2][3])
+        print(f"{sym} RSI:{rsi:.1f} PH:{prev_high} PL:{prev_low}")
+
+        if ltp > prev_high and rsi > 60:
+            sl = prev_low
+            tgt = ltp + (ltp - sl)*1.5
+            send_tg(f"🔥 BUY {sym}\nLTP:{ltp:.2f} RSI:{rsi:.1f}\nBreakout:{prev_high:.2f}\nSL:{sl:.2f}\nTGT:{tgt:.2f}")
+            found = True
+        elif ltp < prev_low and rsi < 50:
+            sl = prev_high
+            tgt = ltp - (sl - ltp)*1.5
+            send_tg(f"🔻 SELL {sym}\nLTP:{ltp:.2f} RSI:{rsi:.1f}\nBreakdown:{prev_low:.2f}\nSL:{sl:.2f}\nTGT:{tgt:.2f}")
+            found = True
+
+    except Exception as e:
+        print(f"{sym} Error: {e}")
+
+if not found:
+    send_tg("V48 Live ✅ No Signal Now\nRSI Filter: BUY>60 SELL<50\nScanned: UNIONBANK, PFC, RECLTD, NBCC, SUZLON")
+
+print("=== V48 DONE ===")
