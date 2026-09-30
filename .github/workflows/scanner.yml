@@ -1,19 +1,15 @@
-name: V44 Angel BUY+SELL+TSL
-on:
-  schedule:
-    - cron: '*/5 3-10 * * 1-5'
-  workflow_dispatch:
+name: V47 Angel BUY+SELL+TSL
+on: workflow_dispatch
 jobs:
   scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Install deps
-        run: pip install -r requirements.txt
-      - name: Run V44 Angel Scanner
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with: { python-version: '3.9' }
+      - run: pip install smartapi-python pyotp requests
+      - run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
@@ -21,4 +17,3 @@ jobs:
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python scanner.py
