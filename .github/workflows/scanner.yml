@@ -1,15 +1,14 @@
-name: V48 Angel Final
+name: V51 Trend Catcher
 on: workflow_dispatch
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - run: pip install --upgrade pip && pip install smartapi-python pyotp requests logzero pycryptodome websocket-client
+      - run: pip install --upgrade pip && pip install smartapi-python pyotp requests pytz pycryptodome websocket-client
       - run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
