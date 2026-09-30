@@ -1,3 +1,5 @@
+smartapi-python
+pyotp
 yfinance
 pandas
 requests
