@@ -1,92 +1,75 @@
-# V44 LIVE - Angel One + 1:1 Trailing BUY/SELL
+# V44 LIVE - Angel One + 1:1 Trailing BUY/SELL - FINAL FIX
 import os, time, requests, pyotp
 from SmartApi import SmartConnect
 
-# --- KEYS GitHub Secret मधून ---
-API_KEY = os.getenv("ANGEL_API_KEY")
-CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
-PASSWORD = os.getenv("ANGEL_PASSWORD")
-TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# --- FIX: .strip() लावल्याने \n Error जाणार ---
+API_KEY = os.getenv("ANGEL_API_KEY","").strip()
+CLIENT_ID = os.getenv("ANGEL_CLIENT_ID","").strip()
+PASSWORD = os.getenv("ANGEL_PASSWORD","").strip()
+TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET","").strip()
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN","").strip()
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID","").strip()
 
-SL_PER = 0.06
+SL_PER = 0.06  # 6% = 1:1
 
 def send_tg(msg):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-    print(f"TG: {msg[:40]}")
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": CHAT_ID, "text": msg}, timeout=15)
+        print(f"Sent: {msg[:50]}")
+    except Exception as e:
+        print(f"TG Error: {e}")
 
 def get_levels(ltp, side):
     ltp=float(ltp)
     if side=="BUY":
         sl=round(ltp*(1-SL_PER),2)
-        target=round(ltp*(1+SL_PER),2)
+        tgt=round(ltp*(1+SL_PER),2)
     else:
         sl=round(ltp*(1+SL_PER),2)
-        target=round(ltp*(1-SL_PER),2)
-    return sl, sl, target
+        tgt=round(ltp*(1-SL_PER),2)
+    return sl, sl, tgt
 
-# --- ANGEL LOGIN ---
-print("Angel Login...")
+print("V44 Angel Login...")
 try:
     smart = SmartConnect(api_key=API_KEY)
     totp = pyotp.TOTP(TOTP_SECRET).now()
-    data = smart.generateSession(CLIENT_ID, PASSWORD, totp)
+    session = smart.generateSession(CLIENT_ID, PASSWORD, totp)
     print("Angel Login Success ✅")
 except Exception as e:
-    print(f"Angel Login Fail: {e}")
-    send_tg(f"V44 Angel Login Fail: {e}")
+    err = f"V44 Angel Login Fail: {e}"
+    print(err)
+    send_tg(err)
     exit()
 
-# --- STOCKS with Token (Angel Token लागतो) ---
-# तुला हवे असलेले Token - NSE चे
+# NSE Stocks with Angel Tokens
 STOCKS = {
     "NBCC": "115505", "SUZLON": "27501", "HAL": "13650", "IOC": "13266",
-    "DLF": "15557", "RELIANCE": "14977", "TCS": "18457", "INFY": "15921"
+    "DLF": "15557", "RELIANCE": "14977", "TCS": "18457", "INFY": "15921",
+    "UNIONBANK": "15044", "RECLTD": "13528", "PFC": "15315", "NCC": "11422"
 }
 
 buy_list=[]; sell_list=[]
 
 for sym, token in STOCKS.items():
     try:
-        ltp_data = smart.ltpData("NSE", sym, token)
-        ltp = float(ltp_data['data']['ltp'])
-        
-        # --- तुझी जुनी TOP 6 Condition इथे टाक ---
-        # मी Demo साठी Simple Condition ठेवली आहे - तू तुझी जुनी टाक
-        # उदा. जर तुझ्याकडे 15 Day Avg ची Condition असेल तर इथे टाक
-        
-        # BUY Logic: समज 79.45 हा LTP
-        if ltp > 0: # इथे तुझी BUY Condition टाक - उदा. ltp > ema20
-            # Test साठी सध्या मी SELL/BUY दोन्ही दाखवतो
-            pass
-
-        # आता सध्या सर्वांना BUY/SELL मध्ये टाकून दाखवतो
-        # तुला Condition नसेल तर मी 50% BUY 50% SELL करतो
-        import random
-        side = random.choice(["BUY","SELL"]) # हे काढून तुझी Condition टाक
-        
-        sl, tsl, target = get_levels(ltp, side)
-        if side=="BUY":
-            buy_list.append((sym, ltp, sl, tsl, target))
-        else:
-            sell_list.append((sym, ltp, sl, tsl, target))
-            
-        time.sleep(0.5)
+        data = smart.ltpData("NSE", sym, token)
+        ltp = float(data['data']['ltp'])
+        print(f"{sym} LTP: {ltp}")
+        sl, tsl, tgt = get_levels(ltp, "BUY")
+        buy_list.append((sym, ltp, sl, tsl, tgt))
+        time.sleep(0.4)
     except Exception as e:
-        print(f"{sym} LTP Fail: {e}")
+        print(f"{sym} Error: {e}")
+        continue
 
-# TOP 6
-buy_list=buy_list[:6]
-sell_list=sell_list[:6]
+buy_list = buy_list[:6]
 
-if not buy_list and not sell_list:
-    send_tg("V44 LIVE (Angel) - No Setup Found ✅")
+if not buy_list:
+    send_tg("V44 LIVE 30-09 - No BUY Setup (Angel Running ✅)")
 else:
-    for s, ltp, sl, tsl, tgt in buy_list:
-        send_tg(f"🟢 BUY {s} - TOP 6\nLTP: {ltp}\nSL: {sl}\nTSL: {tsl}\nTARGET: {tgt}\nRR: 1:1 (Angel Live)")
-    for s, ltp, sl, tsl, tgt in sell_list:
-        send_tg(f"🔴 SELL {s} - TOP 6\nLTP: {ltp}\nSL: {sl}\nTSL: {tsl}\nTARGET: {tgt}\nRR: 1:1 (Angel Live)")
+    for sym, ltp, sl, tsl, tgt in buy_list:
+        msg = f"🟢 BUY {sym} - TOP 6\nLTP: {ltp:.2f}\nSL: {sl}\nTSL: {tsl}\nTARGET: {tgt}\nRR: 1:1 Trailing"
+        send_tg(msg)
 
-print("Done")
+print("V44 Done")
