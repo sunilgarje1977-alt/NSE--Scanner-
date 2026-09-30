@@ -1,5 +1,4 @@
 smartapi-python
+logzero
 pyotp
-yfinance
-pandas
 requests
