@@ -1,4 +1,4 @@
-# V44 LIVE - Candle Low SL + 1:1 Target
+# V44 FINAL - 15 MIN Candle Low SL + BUY/SELL 1:1
 import os, requests, pyotp
 from SmartApi import SmartConnect
 from datetime import datetime, timedelta
@@ -14,56 +14,49 @@ def send_tg(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": CHAT_ID, "text": msg}, timeout=10)
 
-def get_candle_low_smart(smart, token):
+def get_15min(smart, token):
     try:
-        # शेवटच्या 1 दिवसाच्या 5 मिनिटाच्या Candle
         to_date = datetime.now()
         from_date = to_date - timedelta(days=2)
         params = {
             "exchange": "NSE",
             "symboltoken": token,
-            "interval": "FIVE_MINUTE",
+            "interval": "FIFTEEN_MINUTE", # 15 MIN
             "fromdate": from_date.strftime("%Y-%m-%d %H:%M"),
             "todate": to_date.strftime("%Y-%m-%d %H:%M")
         }
         data = smart.getCandleData(params)
         candles = data['data']
         if not candles: return None, None
-        last_candle = candles[-1] # [timestamp, open, high, low, close, volume]
-        candle_low = float(last_candle[3])
-        candle_high = float(last_candle[2])
-        ltp = float(last_candle[4])
-        return ltp, candle_low, candle_high
-    except:
+        last = candles[-1] # [ts, open, high, low, close]
+        low_15 = float(last[3])
+        high_15 = float(last[2])
+        close_15 = float(last[4])
+        return low_15, high_15, close_15
+    except Exception as e:
+        print(f"Candle Error {e}")
         return None, None, None
 
-print("Angel Login...")
 smart = SmartConnect(api_key=API_KEY)
-totp = pyotp.TOTP(TOTP_SECRET).now()
-smart.generateSession(CLIENT_ID, PASSWORD, totp)
-print("Login Success ✅")
+smart.generateSession(CLIENT_ID, PASSWORD, pyotp.TOTP(TOTP_SECRET).now())
+print("Login OK")
 
 STOCKS = {
-    "NBCC": "115505", "SUZLON": "27501", "HAL": "13650", "IOC": "13266",
-    "TCS": "30207", "UNIONBANK": "15044", "RECLTD": "13528", "PFC": "15315"
+    "UNIONBANK": "15044", "PFC": "15315", "RECLTD": "13528",
+    "NBCC": "115505", "SUZLON": "27501", "TCS": "11536",
+    "INFY": "1594", "RELIANCE": "2885"
 }
 
 for sym, token in STOCKS.items():
     try:
-        ltp, low, high = get_candle_low_smart(smart, token)
-        if not ltp: continue
+        ltp = float(smart.ltpData("NSE", sym, token)['data']['ltp'])
+        low15, high15, close15 = get_15min(smart, token)
+        if not low15: continue
 
-        # --- BUY: SL = Candle Low, TARGET = 1:1 ---
-        risk = ltp - low
-        if risk <= 0: continue
-
-        sl = round(low, 2)
-        target = round(ltp + risk, 2) # 1:1
-        tsl = sl
-
-        msg = f"🟢 BUY {sym} - TOP 6\nLTP: {ltp:.2f}\nCandle LOW: {low:.2f}\nSL: {sl} (Candle Low)\nTSL: {tsl}\nTARGET: {target}\nRR: 1:1"
-        send_tg(msg)
-        print(msg)
-
-    except Exception as e:
-        print(f"{sym} Error {e}")
+        # BUY Condition: LTP > 15min Close
+        if ltp >= close15:
+            risk = ltp - low15
+            if risk < ltp*0.003: risk = ltp*0.01 # Min 0.3% to 1% filter
+            sl = round(low15, 2)
+            tgt = round(ltp + risk, 2)
+            send_tg(f"🟢 BUY {sym}\nLTP: {ltp:.2f}\n15M
