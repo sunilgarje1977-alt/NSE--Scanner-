@@ -1,20 +1,16 @@
-name: V47 Angel BUY SELL TSL
+name: V48 Angel Final
 on: workflow_dispatch
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - name: Install deps
-        run: |
-          pip install --upgrade pip
-          pip install smartapi-python pyotp requests logzero pycryptodome websocket-client
-      - name: Run scanner
-        run: python scanner.py
+      - run: pip install --upgrade pip && pip install smartapi-python pyotp requests logzero pycryptodome websocket-client
+      - run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
