@@ -51,16 +51,15 @@ def check_trend(obj):
     buy_list, sell_list = [], []
     for stock in STOCKS:
         try:
-            # Angel Historical Data - 1Day
-            from SmartApi.smartApi import SmartApi
-            params = {"exchange": "NSE", "symboltoken": "", "interval": "ONE_DAY", "fromdate": "2024-01-01 09:15", "todate": datetime.now().strftime("%Y-%m-%d %H:%M")}
-            # सोपं - LTP वरून check करू सध्या
-            ltp_data = obj.ltpData("NSE", f"{stock}-EQ", "26000") # dummy token, real मध्ये token list लागेल
-            # NOTE: तुझ्या जुन्या File मध्ये Token List होता तो इथे Add कर
-            # खाली तुझा V51 Logic - हा आता Working आहे
+      for stock in STOCKS:
+        try:
             print(f"Checking {stock}...")
-            # Demo साठी - इथे तुझा खरा Indicator Logic येईल
-            # मी आता Structure देतोय, तुझ्या Angel Token सह काम करेल
+            # इथे तुझा खरा V51 Logic येईल - सध्या Demo साठी Skip करतोय
+            # Angel Token List तुझ्या जुन्या File मधून घ्यायचाय
+
+        except Exception as e:
+            print(f"{stock} Error {e}")
+            continue      
             
         except Exception as e:
             print(f"{stock} Error {e}")
