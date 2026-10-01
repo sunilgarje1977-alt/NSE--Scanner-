@@ -1,7 +1,6 @@
 import os, requests, pyotp, time
 from datetime import datetime
 from SmartApi import SmartConnect
-import pandas as pd
 
 # --- Secrets ---
 API_KEY = os.getenv('ANGEL_API_KEY')
