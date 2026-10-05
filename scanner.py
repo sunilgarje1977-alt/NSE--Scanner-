@@ -13,10 +13,12 @@ STOCKS_5X = ["BANDHANBNK","WELCORP","GROWW","DMART","ZENSAR","MRPL","IDEA","SUZL
 
 def make_signal(sym, entry, side, vwap, volx):
     sl = round(vwap*0.997,2) if side=="LONG" else round(vwap*1.003,2)
+    t1 = round(entry*1.01,2) if side=="LONG" else round(entry*0.99,2)
+    t2 = round(entry*1.02,2) if side=="LONG" else round(entry*0.98,2)
     if side=="LONG":
-        return f"✅ {sym} LONG @ {entry} | {volx}x VOL | 5x MARGIN\n SL: {sl} | T1: {round(entry*1.01,2)} (1%) | T2: {round(entry*1.02,2)} (2%)\n 3:15 PM BOOK"
+        return f"✅ {sym} LONG @ {entry} | {volx}x VOL\nSL: {sl} | T1 {t1} T2 {t2}"
     else:
-        return f"🔴 {sym} SHORT @ {entry} | {volx}x VOL | 5x MARGIN\n SL: {sl} | T1: {round(entry*0.99,2)} (1%) | T2: {round(entry*0.98,2)} (2%)\n 3:15 PM BOOK"
+        return f"🔴 {sym} SHORT @ {entry} | {volx}x VOL\nSL: {sl} | T1 {t1} T2 {t2}"
 
 def check(sym):
     token = token_map.get(sym)
@@ -32,26 +34,22 @@ def check(sym):
         df['vol20']=df['v'].rolling(20).mean()
         last=df.iloc[-1]; prev=df.iloc[-2]
         if last['c']<20 or last['c']>1500: return None
-        if last['v'] < last['vol20']*2.5: return None
+        if last['v'] < last['vol20']*2.0: return None
         if abs(last['c']/last['vwap']-1) > 0.025: return None
-        fresh_long = prev['ema9']<prev['vwap'] and last['ema9']>last['vwap'] and last['ema9']>last['ema15']
-        fresh_short = prev['ema9']>prev['vwap'] and last['ema9']<last['vwap'] and last['ema9']<last['ema15']
         volx = round(last['v']/last['vol20'],1)
-        if fresh_long: return make_signal(sym, round(last['c'],2), "LONG", last['vwap'], volx)
-        if fresh_short: return make_signal(sym, round(last['c'],2), "SHORT", last['vwap'], volx)
+        if prev['ema9']<prev['vwap'] and last['ema9']>last['vwap'] and last['ema9']>last['ema15']:
+            return make_signal(sym, last['c'], "LONG", last['vwap'], volx)
+        if prev['ema9']>prev['vwap'] and last['ema9']<last['vwap'] and last['ema9']<last['ema15']:
+            return make_signal(sym, last['c'], "SHORT", last['vwap'], volx)
     except: return None
 
 results=[]
-with ThreadPoolExecutor(max_workers=20) as exe:
+with ThreadPoolExecutor(max_workers=30) as exe:
     for f in as_completed({exe.submit(check, s): s for s in STOCKS_5X}):
         r=f.result()
         if r: results.append(r)
 
 now_ist = datetime.now() + timedelta(hours=5, minutes=30)
-if now_ist.hour==15 and now_ist.minute>=10:
-    msg = "⚠️ 3:15 PM SQUARE OFF ⚠️\nसगळे MIS BOOK करा!"
-else:
-    msg = f"V51 5x 2.5xVOL {now_ist.strftime('%H:%M')} - {len(results[:7])} Signals:\n\n" + "\n\n".join(results[:7]) if results else f"V51 {now_ist.strftime('%H:%M')} - NO TRADE"
-
+msg = f"ANGEL NSE {now_ist.strftime('%H:%M')} - {len(results)} Signals\n\n" + "\n\n".join(results[:10]) if results else f"ANGEL NSE {now_ist.strftime('%H:%M')} - NO TRADE"
 requests.post(f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage", data={"chat_id":os.getenv('TELEGRAM_CHAT_ID'),"text":msg})
 print(msg)
