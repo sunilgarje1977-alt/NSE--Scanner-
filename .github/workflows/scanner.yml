@@ -3,7 +3,6 @@ on:
   schedule:
     - cron: '15 3 * * 1-5'  # 9:15 AM IST
     - cron: '30 3 * * 1-5'  # 9:30 AM
-    - cron: '0 4 * * 1-5'   # 9:30 AM extra
     - cron: '45 9 * * 1-5'  # 3:15 PM IST Square Off
   workflow_dispatch:
 jobs:
@@ -12,9 +11,12 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
-        with: { python-version: '3.9' }
-      - run: pip install smartapi-python pandas requests pyotp
-      - run: python scanner.py
+        with: 
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install smartapi-python pandas requests pyotp logzero
+      - name: Run scanner
+        run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
