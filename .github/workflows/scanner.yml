@@ -1,18 +1,20 @@
-name: V51 Trend Catcher
-on: workflow_dispatch
+name: V51 Smallcap 400 Scanner
+on:
+  schedule:
+    - cron: '15 3 * * 1-5' # रोज सकाळी 9:00 IST ला Auto
+  workflow_dispatch: # तुला हाताने Run करता येईल
+
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - name: Install Libs
-        run: pip install --upgrade pip && pip install smartapi-python pyotp requests logzero pytz pycryptodome websocket-client
-      - name: Run Scanner
-        run: python scanner.py
+      - run: pip install -r requirements.txt
+      - run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
