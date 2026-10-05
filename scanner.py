@@ -34,7 +34,7 @@ def check(sym):
         df['vol20'] = df['v'].rolling(20).mean()
         last = df.iloc[-1]
         prev = df.iloc[-2]
-        if last['c'] < 10: return None # 5PAISA साठी 10₹ केला
+        if last['c'] < 50: return None # फक्त 50₹+ शेअर
         if last['vol20'] == 0 or last['v'] < last['vol20']*1.8: return None
         if abs(last['c']/last['vwap']-1) > 0.025: return None
         volx = round(last['v']/last['vol20'],1)
