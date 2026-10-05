@@ -1,88 +1,62 @@
-import os, requests, pandas as pd, time, pyotp
+import os, requests, pandas as pd, pyotp
 from SmartApi import SmartConnect
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-print("Starting V51 Scanner...")
+obj = SmartConnect(api_key=os.getenv("ANGEL_API_KEY"))
+obj.generateSession(os.getenv("ANGEL_CLIENT_ID"), os.getenv("ANGEL_PASSWORD"), pyotp.TOTP(os.getenv("ANGEL_TOTP_SECRET")).now())
 
-# --- 1. Angel Login ---
-API_KEY = os.getenv("ANGEL_API_KEY")
-CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
-PASSWORD = os.getenv("ANGEL_PASSWORD") # इथे 4 अंकी MPIN हवा!
-TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
+master = requests.get("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json", timeout=30).json()
+token_map = {d['symbol'].replace('-EQ',''): d['token'] for d in master if d.get('exch_seg')=='NSE' and str(d.get('symbol','')).endswith('-EQ')}
 
-obj = SmartConnect(api_key=API_KEY)
-totp = pyotp.TOTP(TOTP_SECRET).now()
-session = obj.generateSession(CLIENT_ID, PASSWORD, totp)
-print(f"Angel Login: {session}")
+# --- 5X MARGIN Smallcap List - हे Angel MIS मध्ये 5x देतात ---
+MARGIN_5X_SMALLCAP = [
+"BANDHANBNK","WELCORP","GROWW","DMART","ZENSAR","MRPL","IDEA","SUZLON","AEGISLOG","CDSL","CEATLTD",
+"CAMS","CHALET","DEEPAKNTR","DELHIVERY","EQUITASBNK","GSPL","IEX","IRB","JUBLPHARMA","KEI","KARURVYSYA",
+"LATENTVIEW","MAPMYINDIA","MEDPLUS","METROPOLIS","NAZARA","NYKAA","POLYMED","PRAJIND","RBA","ROUTE",
+"SAPPHIRE","STLTECH","TANLA","TRIDENT","UJJIVANSFB","ZENTEC","BLS","CRAFTSMAN","FIVESTAR","HAPPSTMNDS",
+"ANANDRATHI","AFFLE","ABSLAMC","APTUS","VIJAYA","STARHEALTH","KIMS","TIMKEN","SYNGENE","PVRINOX",
+"RADICO","NATCOPHARM","BLUESTARCO","CLEAN","FINEORG","GALAXYSURF","ATUL","AARTIPHARM","JBCHEPHARM",
+"JKLAKSHMI","LEMONTREE","INDIACEM","HOMEFIRST","CHEMPLASTS","DEVYANI","BIKAJI","MUTHOOTMF","NUVAMA"
+]
 
-# --- 2. Token Map Auto - Fix केलेला ---
-print("Downloading Token Map...")
-url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-master = requests.get(url, timeout=30).json()
-# Fix: symboltype नाही - फक्त -EQ बघतोय
-token_map = {}
-for d in master:
-    if d.get('exch_seg') == 'NSE' and str(d.get('symbol','')).endswith('-EQ'):
-        sym = d['symbol'].replace('-EQ','').strip()
-        token_map[sym] = d['token']
+def make_signal(sym, entry, side, vwap, volx):
+    sl = round(vwap*0.997,2) if side=="LONG" else round(vwap*1.003,2)
+    return f"{'✅' if side=='LONG' else '🔴'} {sym} {side} @ {entry} | {volx}x VOL | 5x MARGIN\n SL: {sl}\n T1: {round(entry*1.01,2) if side=='LONG' else round(entry*0.99,2)} (1% 50% BOOK)\n T2: {round(entry*1.02,2) if side=='LONG' else round(entry*0.98,2)} (2% TRAIL)\n MIS 5x - 3:15 BOOK"
 
-print(f"Tokens Loaded: {len(token_map)}")
-
-# --- 3. NSE 400 List ---
-def get_symbols():
-    try:
-        r = requests.get("https://archives.nseindia.com/content/equities/EQUITY_L.csv",
-                         headers={"User-Agent":"Mozilla/5.0"}, timeout=20)
-        df = pd.read_csv(pd.io.common.StringIO(r.text))
-        syms = [s.strip() for s in df['SYMBOL'].tolist() if "-" not in str(s)]
-        return syms[:400]
-    except:
-        return ["BANDHANBNK","WELCORP","DPWIRES","GROWW","DMART","PFOCUS","MRPL","ZENSAR","IDEA","SUZLON"]
-
-SYMBOLS = get_symbols()
-print(f"Scanning {len(SYMBOLS)}")
-
-# --- 4. V51 + Volume Check - तुझ्या फोटो सारखा ---
-results = []
-for sym in SYMBOLS:
+def check(sym):
     token = token_map.get(sym)
-    if not token: continue
+    if not token: return None
     try:
-        param = {
-            "exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE",
-            "fromdate":(datetime.now()-timedelta(days=2)).strftime("%Y-%m-%d %H:%M"),
-            "todate": datetime.now().strftime("%Y-%m-%d %H:%M")
-        }
-        data = obj.getCandleData(param)
-        if not data or not data['data']: continue
+        p = {"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":(datetime.now()-timedelta(days=2)).strftime("%Y-%m-%d %H:%M"),"todate": datetime.now().strftime("%Y-%m-%d %H:%M")}
+        d = obj.getCandleData(p)
+        if not d['data']: return None
+        df = pd.DataFrame(d['data'], columns=['ts','o','h','l','c','v'])
+        df['ema9']=df['c'].ewm(span=9).mean(); df['ema15']=df['c'].ewm(span=15).mean()
+        df['vwap']=(df['c']*df['v']).cumsum()/df['v'].cumsum(); df['vol20']=df['v'].rolling(20).mean()
+        last=df.iloc[-1]; prev=df.iloc[-2]
+        if last['c']<20 or last['c']>1500: return None
+        if last['v'] < last['vol20']*2.5: return None # Volume Filter
+        fresh_long = prev['ema9']<prev['vwap'] and last['ema9']>last['vwap']
+        fresh_short = prev['ema9']>prev['vwap'] and last['ema9']<last['vwap']
+        volx = int(last['v']/last['vol20'])
+        if fresh_long: return make_signal(sym, round(last['c'],2), "LONG", last['vwap'], volx)
+        if fresh_short: return make_signal(sym, round(last['c'],2), "SHORT", last['vwap'], volx)
+    except: return None
 
-        df = pd.DataFrame(data['data'], columns=['ts','o','h','l','c','v'])
-        df['ema9'] = df['c'].ewm(span=9).mean()
-        df['ema15'] = df['c'].ewm(span=15).mean()
-        df['vwap'] = (df['c']*df['v']).cumsum()/df['v'].cumsum()
-        df['vol20'] = df['v'].rolling(20).mean()
+results=[]
+with ThreadPoolExecutor(max_workers=20) as exe:
+    for f in as_completed({exe.submit(check, s): s for s in MARGIN_5X_SMALLCAP}):
+        r=f.result()
+        if r: results.append(r)
 
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
+results = sorted(results, key=lambda x: 0, reverse=True)[:7]
+now_ist = datetime.now() + timedelta(hours=5, minutes=30)
+msg = f"V51 SMALLCAP 5x MARGIN {now_ist.strftime('%H:%M')} - {len(results)} Signals:\n\n" + "\n\n".join(results) if results else f"V51 5x {now_ist.strftime('%H:%M')} - NO TRADE"
 
-        if abs(last['c']/prev['c']-1) > 0.15: continue
-        if last['v'] < last['vol20']*1.5: continue
+# 3:15 Square off
+if now_ist.hour==15 and now_ist.minute>=10:
+    msg = "⚠️ 3:15 PM SQUARE OFF - MIS 5x वाले सगळे BOOK करा! ✅"
 
-        long_c = last['ema9']>last['vwap'] and last['ema15']>last['vwap'] and last['ema9']>last['ema15'] and last['c']>last['vwap']
-        short_c = last['ema9']<last['vwap'] and last['ema15']<last['vwap'] and last['ema9']<last['ema15'] and last['c']<last['vwap']
-
-        if long_c:
-            results.append(f"✅ {sym} LONG @ {round(last['c'],2)}")
-        elif short_c:
-            results.append(f"🔴 {sym} SHORT @ {round(last['c'],2)}")
-
-    except: continue
-    time.sleep(0.35)
-
-if results:
-    msg = f"V51 Smallcap 400 - {len(results)} Signals:\n" + "\n".join(results)
-    requests.post(f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage",
-                  data={"chat_id":os.getenv('TELEGRAM_CHAT_ID'),"text":msg})
-    print(msg)
-else:
-    print("DONE - Cross नाही - NO TRADE") 
+requests.post(f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage", data={"chat_id":os.getenv('TELEGRAM_CHAT_ID'),"text":msg})
+print(msg)
