@@ -1,21 +1,20 @@
-import pandas as pd, pyotp, requests
+import os, requests, pandas as pd, pyotp
 from SmartApi import SmartConnect
 from datetime import datetime, timedelta
-import os
 
-# --- तुझे Keys इथे टाक ---
-API_KEY = "तुझा API KEY"
-CLIENT_ID = "तुझा CLIENT ID"
-PASSWORD = "तुझा PASSWORD"
-TOTP_SECRET = "तुझा TOTP SECRET"
+API_KEY = os.getenv("ANGEL_API_KEY")
+CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
+PASSWORD = os.getenv("ANGEL_PASSWORD")
+TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
 
 obj = SmartConnect(api_key=API_KEY)
-obj.generateSession(CLIENT_ID, PASSWORD, pyotp.TOTP(TOTP_SECRET).now())
+clean_secret = TOTP_SECRET.strip().replace(" ", "").upper()
+obj.generateSession(CLIENT_ID, PASSWORD, pyotp.TOTP(clean_secret).now())
 
 master = requests.get("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json", timeout=30).json()
 token_map = {d['symbol'].replace('-EQ',''): d['token'] for d in master if d.get('exch_seg')=='NSE' and str(d.get('symbol','')).endswith('-EQ')}
 
-STOCKS = ["AARTIIND","ABSLAMC","ANGELONE","BEL","BSE","CAMS","CDSL","COFORGE","HAL","IEX","BANKBARODA","BHEL"] # Test साठी 12 टाकलेत, हवे तर 166 टाक
+STOCKS = ["AARTIIND","ABSLAMC","ANGELONE","BEL","BSE","CAMS","CDSL","COFORGE","HAL","IEX","BANKBARODA","BHEL"]
 
 def backtest(sym, days=5):
     token = token_map.get(sym)
@@ -28,22 +27,16 @@ def backtest(sym, days=5):
     df['ema15'] = df['c'].ewm(span=15).mean()
     df['vwap'] = (df['c']*df['v']).cumsum()/df['v'].cumsum()
     df['vol20'] = df['v'].rolling(20).mean()
-
     trades = []
     for i in range(21, len(df)):
         last = df.iloc[i]
         prev = df.iloc[i-1]
-        if last['c'] < 50: continue
-        if last['v'] < 20000: continue
-        if last['v'] < last['vol20']*1.8: continue
-
+        if last['c'] < 50 or last['v'] < 20000 or last['vol20']==0 or last['v'] < last['vol20']*1.8: continue
         if prev['ema9'] < prev['ema15'] and last['ema9'] > last['ema15'] and last['c'] > last['vwap']:
-            # पुढच्या 10 Candle मध्ये किती Profit?
             future = df.iloc[i+1:i+11]
             if len(future)>0:
                 max_up = (future['h'].max() - last['c'])/last['c']*100
                 trades.append([sym, "LONG", round(last['c'],2), round(max_up,2)])
-
         if prev['ema9'] > prev['ema15'] and last['ema9'] < last['ema15'] and last['c'] < last['vwap']:
             future = df.iloc[i+1:i+11]
             if len(future)>0:
@@ -53,11 +46,9 @@ def backtest(sym, days=5):
 
 all_trades = []
 for s in STOCKS:
-    all_trades.extend(backtest(s))
+    all_trades.extend(backtest(s, days=5))
 
-df_result = pd.DataFrame(all_trades, columns=['Stock','Side','Entry','Max_Profit_%_in_50min'])
+import pandas as pd
+df_result = pd.DataFrame(all_trades, columns=['Stock','Side','Entry','Max_Profit_%'])
 print(df_result)
 print(f"\nTotal Trades: {len(df_result)}")
-if len(df_result)>0:
-    print(f"Avg Profit Potential: {df_result['Max_Profit_%_in_50min'].mean():.2f}%")
-    print(f"Winners >1%: {(df_result['Max_Profit_%_in_50min']>1).sum()} / {len(df_result)}")
