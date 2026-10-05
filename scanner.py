@@ -1,60 +1,70 @@
-import os, pyotp
 from SmartApi import SmartConnect
-import requests
+import pyotp
+import pandas as pd
+import json, os
+from datetime import datetime, timedelta
 
-API_KEY = os.getenv('ANGEL_API_KEY','').strip()
-CLIENT_ID = os.getenv('ANGEL_CLIENT_ID','').strip()
-PASSWORD = os.getenv('ANGEL_PASSWORD','').strip()
-TOTP_SECRET = os.getenv('ANGEL_TOTP_SECRET','').strip()
-BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN','').strip()
-CHAT_ID = os.getenv('TELEGRAM_CHAT_ID','').strip()
+# --- ANGEL KEY - इथे तुझी Key टाक ---
+API_KEY = os.getenv("ANGEL_API_KEY")  # GitHub Secret मधून येईल
+CLIENT_CODE = os.getenv("ANGEL_CLIENT_CODE")
+PASSWORD = os.getenv("ANGEL_PASSWORD")
+TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
 
-STOCKS = ["SUNTV", "UNIONBANK", "MUTHOOTFIN"] # तुझी List इथे टाक
+# Login
+obj = SmartConnect(api_key=API_KEY)
+totp = pyotp.TOTP(TOTP_SECRET).now()
+session = obj.generateSession(CLIENT_CODE, PASSWORD, totp)
+print("Login:", session['message'])
 
-def get_ema(prices, period):
-    if len(prices) < period: return None
-    ema = sum(prices[:period]) / period
-    k = 2 / (period + 1)
-    for price in prices[period:]:
-        ema = price * k + ema * (1 - k)
-    return ema
-
-def get_rsi(prices, period=14):
-    if len(prices) < period+1: return 50
-    gains, losses = 0, 0
-    for i in range(1, period+1):
-        diff = prices[-i] - prices[-i-1]
-        if diff > 0: gains += diff
-        else: losses += abs(diff)
-    if losses == 0: return 85
-    rs = gains / losses
-    return 100 - (100 / (1 + rs))
-
-def check_trend(obj):
-    buy_list, sell_list = [], []
-    for stock in STOCKS:
-        try:
-            print(f"Checking {stock}...")
-            # तुझा खरा V51 Logic इथे येईल
-        except Exception as e:
-            print(f"{stock} Error {e}")
-            continue
-    return buy_list, sell_list
-
-# --- Main ---
+# NSE Smallcap 400 Tokens - तुझ्या 5000.py मधून घे
+# हा File मी तुझ्या Repo वरून घेतला
 try:
-    totp = pyotp.TOTP(TOTP_SECRET).now()
-    smartApi = SmartConnect(API_KEY)
-    data = smartApi.generateSession(CLIENT_ID, PASSWORD, totp)
-    print("Login OK")
-    b, s = check_trend(smartApi)
-    if not b and not s:
-        print("✅ No BUY/SELL - Telegram Skipped")
-    else:
-        msg = ""
-        if b: msg += "🚀 BUY: " + ", ".join(b) + "\n"
-        if s: msg += "🔻 SELL: " + ", ".join(s) + "\n"
-        requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={CHAT_ID}&text={msg}")
-        print("Signal Sent")
-except Exception as e:
-    print(f"Login/Main Error {e}")
+    with open('trades_state.json','r') as f:
+        TOKENS = json.load(f)
+except:
+    # Demo - तुझे 10 Symbols
+    TOKENS = {"BANDHANBNK": "22639", "WELCORP": "11483", "DPWIRES": "24755"}
+
+def get_data(token):
+    param = {
+        "exchange": "NSE", "symboltoken": token, "interval": "FIVE_MINUTE",
+        "fromdate": (datetime.now()-timedelta(days=2)).strftime("%Y-%m-%d %H:%M"),
+        "todate": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+    data = obj.getCandleData(param)
+    if not data['data']: return None
+    df = pd.DataFrame(data['data'], columns=['ts','o','h','l','c','v'])
+    df['ema9'] = df['c'].ewm(span=9).mean()
+    df['ema15'] = df['c'].ewm(span=15).mean()
+    df['vwap'] = (df['c']*df['v']).cumsum()/df['v'].cumsum()
+    df['vol20'] = df['v'].rolling(20).mean()
+    return df
+
+# Scan Start
+results = []
+for sym, token in TOKENS.items():
+    df = get_data(token)
+    if df is None or len(df)<30: continue
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    # 1. Circuit - DPWIRES Filter
+    if abs(last['c']/prev['c']-1) > 0.15:
+        continue  # DONE - Cross नाही
+
+    # 2. Volume Check - तू सांगितलास
+    if last['v'] < last['vol20']*1.5:
+        continue  # Volume नाही
+
+    # 3. EMA VWAP Cross - तुझा Main Rule
+    long_c = last['ema9']>last['vwap'] and last['ema15']>last['vwap'] and last['ema9']>last['ema15'] and last['c']>last['vwap']
+    short_c = last['ema9']<last['vwap'] and last['ema15']<last['vwap'] and last['ema9']<last['ema15'] and last['c']<last['vwap']
+
+    if long_c:
+        results.append({"symbol": sym, "signal": "LONG", "price": last['c'], "sl": last['vwap']*0.995})
+    elif short_c:
+        results.append({"symbol": sym, "signal": "SHORT", "price": last['c'], "sl": last['vwap']*1.005})
+
+# Save
+pd.DataFrame(results).to_csv("today_signals.csv", index=False)
+print(f"Done: {len(results)} signals - {results}")
