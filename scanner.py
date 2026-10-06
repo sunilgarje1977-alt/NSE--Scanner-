@@ -3,12 +3,12 @@ import pandas as pd
 from SmartApi import SmartConnect
 
 # Secrets from GitHub
-API_KEY = os.getenv("API_KEY")
-CLIENT_ID = os.getenv("CLIENT_ID")
-PWD = os.getenv("MPIN")
-TOTP_SECRET = os.getenv("TOTP_SECRET")
-TELE_TOKEN = os.getenv("TELE_TOKEN")
-TELE_CHAT = os.getenv("TELE_CHAT")
+API_KEY = os.getenv("ANGEL_API_KEY")
+CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
+PwD = os.getenv("ANGEL_PASSWORD")
+TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
+TELE_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELE_CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
 STATE_FILE = "state.json"
 IST = pytz.timezone('Asia/Kolkata')
