@@ -107,4 +107,4 @@ if buys or sells:
     msg=""
     for b in buys: msg+=f"🟢 BUY {b['symbol']} @ {b['ltp']:.2f} SL {b['sl']:.2f} TGT {b['tp']:.2f} Score {b['score']}/4 {b['pat']}\n"
     for s in sells: msg+=f"🔴 SELL {s['symbol']} @ {s['ltp']:.2f} SL {s['sl']:.2f} TGT {s['tp']:.2f} Score {s['score']}/4 {s['pat']}\n"
-    send_tg(msg)
+    send_tg(msg) 
