@@ -1,11 +1,8 @@
-name: BSE1000 VWAP Scanner
-
+name: BSE1000 Live 9:15-15:15
 on:
   schedule:
-    # 9:15 ते 15:15 IST = 3:45 ते 9:45 UTC - दर 10 मिनिटाला
     - cron: '*/10 3-9 * * 1-5'
   workflow_dispatch:
-
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -14,21 +11,11 @@ jobs:
       - uses: actions/setup-python@v4
         with: { python-version: '3.10' }
       - run: pip install smartapi-python pandas requests pyotp pytz
-      - name: Run Scanner
+      - run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          # 9:15 ते 15:15 IST मध्येच चालव
-          HOUR=$(TZ='Asia/Kolkata' date +%H)
-          MIN=$(TZ='Asia/Kolkata' date +%M)
-          TIME=$((10#$HOUR*60+10#$MIN))
-          if [ $TIME -ge 555 ] && [ $TIME -le 915 ]; then
-            python scanner.py
-          else
-            echo "Market Closed - $HOUR:$MIN IST"
-          fi 
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }} 
