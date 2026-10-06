@@ -1,10 +1,8 @@
-name: Angel NSE Scanner
+name: NSE 500 Scanner - ITC Pattern
+
 on:
   schedule:
-    - cron: '15 3 * * 1-5'
-    - cron: '30 3 * * 1-5'
-    - cron: '0 6 * * 1-5'
-    - cron: '45 9 * * 1-5'
+    - cron: '*/5 3-10 * * 1-5'  # दर 5 मिनिटाला 9:15 ते 15:30 IST (03:45-10:00 UTC)
   workflow_dispatch:
 
 jobs:
@@ -12,15 +10,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
-      - run: pip install smartapi-python pandas requests pyotp logzero websocket-client
-      - run: python scanner.py
+          python-version: '3.10'
+      - name: Install deps
+        run: pip install pandas SmartApi python-dotenv requests pyotp pytz
+      - name: Run Scanner
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }} 
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scanner.py 
