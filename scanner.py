@@ -1,67 +1,146 @@
-import os, requests, pandas as pd, pyotp
+import os, json, datetime, pytz, requests, pyotp
+import pandas as pd
 from SmartApi import SmartConnect
-from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# Secrets from GitHub
+API_KEY = os.getenv("API_KEY")
+CLIENT_ID = os.getenv("CLIENT_ID")
+PWD = os.getenv("MPIN")
+TOTP_SECRET = os.getenv("TOTP_SECRET")
+TELE_TOKEN = os.getenv("TELE_TOKEN")
+TELE_CHAT = os.getenv("TELE_CHAT")
 
-obj = SmartConnect(api_key=os.getenv("ANGEL_API_KEY"))
-totp = pyotp.TOTP(os.getenv("ANGEL_TOTP_SECRET").strip().replace(" ","").upper()).now()
-obj.generateSession(os.getenv("ANGEL_CLIENT_ID"), os.getenv("ANGEL_PASSWORD"), totp)
+STATE_FILE = "state.json"
+IST = pytz.timezone('Asia/Kolkata')
+def ist_now(): return datetime.datetime.now(IST)
 
-master = requests.get("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json", timeout=30).json()
-token_map = {d['symbol'].replace('-EQ',''): d['token'] for d in master if d.get('exch_seg')=='NSE' and str(d.get('symbol','')).endswith('-EQ')}
-
-def send_telegram(msg):
-    try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg})
+def send_tg(msg):
+    try:
+        url = f"https://api.telegram.org/bot{TELE_TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": TELE_CHAT, "text": msg})
     except: pass
 
-# FINAL 483 RAW -> 369 UNIQUE
-RAW_LIST = ["360ONE","AADHARHFC","AAVAS","ABSLAMC","AEGISLOG","AFFLE","AARTIIND","ABFRL","ADANIGREEN","ADANIPOWER","AJANTPHARM","AKZOINDIA","ALEMBICLTD","ALKYLAMINE","AMBER","ANANDRATHI","ANGELONE","ANURAS","APARINDS","APLAPOLLO","APLLTD","APTUS","ARCHEAN","ASAHIINDIA","ASTERDM","ASTRAL","ATUL","AUBANK","AVANTIFEED","AVANTEL","BALAMINES","BALKRISIND","BALRAMCHIN","BANDHANBNK","BANKINDIA","BATAINDIA","BAYERCROP","BDL","BEML","BHEL","BIKAJI","BIOCON","BIRLACORPN","BLUEDART","BLUESTARCO","BSE","CAMS","CAMPUS","CAPLIPOINT","CARBORUNIV","CARTRADE","CASTROLIND","CCL","CEAT","CENTRALBK","CERA","CESC","CGCL","CHALET","CHAMBLFERT","CHEMPLASTS","CHENNPETRO","CHOICEIN","CHOLAFIN","CLEAN","COCHINSHIP","COFORGE","CRAFTSMAN","CREDITACC","CROMPTON","CSBBANK","CUB","CUPID","CYIENT","DATAPATTNS","DBCORP","DCBBANK","DEEPAKFERT","DEEPAKNTR","DELTACORP","DEVYANI","EASEMYTRIP","EDELWEISS","EICHERMOT","ELECON","ELGIEQUIP","EMBASSYDEV","ENDURANCE","EQUITASBNK","ERIS","EXIDEIND","FDC","FEDERALBNK","FINEORG","FSL","GABRIEL","GARFIBRES","GESHIP","GHCL","GLENMARK","GMRINFRA","GNFC","GODREJPROP","GRANULES","GRAPHITE","GRINDWELL","GRSE","GSFC","GSPL","GULFOILLUB","HAPPSTMNDS","HFCL","HINDCOPPER","HOMEFIRST","HONASA","HUDCO","IEX","IDBI","IDFCFIRSTB","IIFL","INDIACEM","INDIAMART","INDIANB","INDIGO","INDOCO","INDUSINDBK","INTELLECT","IOB","IPCALAB","IRCON","IRFC","JBCHEPHARM","JINDALSTEL","JUBLINGREA","JUBLFOOD","JUSTDIAL","JYOTHYLAB","KAJARIACER","KALYANKJIL","KARURVYSYA","KEC","KEI","KFINTECH","KPITTECH","KRBL","KPRMILL","KIMS","LATENTVIEW","LAURUSLABS","LEMONTREE","LTF","MANAPPURAM","MANYAVAR","MASTEK","MAXHEALTH","MCX","MEDANTA","METROPOLIS","MFSL","MOTHERSON","MOIL","MRPL","MUTHOOTFIN","NAM-INDIA","NATIONALUM","NAUKRI","NBCC","NCC","NH","NHPC","NMDC","NOCIL","NUVAMA","OBEROIRLTY","OLECTRA","ONWARDTEC","PEL","PERSISTENT","PETRONET","PFIZER","PHOENIXLTD","PNBHOUSING","PNCINFRA","POLYCAB","POLYMED","PRAJIND","PRESTIGE","PVRINOX","QUESS","RADICO","RAIN","RAILTEL","RALLIS","RBLBANK","REDINGTON","RITES","ROUTE","RVNL","SAIL","SAPPHIRE","SBICARD","SBFC","SOBHA","SONACOMS","SOUTHBANK","STLTECH","SUZLON","SYNGENE","TATACHEM","TATACOMM","TEJASNET","THOMASCOOK","TITAGARH","TRIDENT","TVSMOTOR","UJJIVANSFB","UNOMINDA","VOLTAS","WELCORP","YESBANK","ZEEL","ZENSARTECH","ZYDUSLIFE","BLS","DELHIVERY","DMART","FIVESTAR","GLAND","GRINFRA","LICHSGFIN","METROBRAND","NAZARA","NYKAA","POONAWALLA","TATATECH","UTIAMC","VIJAYA","ZOMATO","ANANTRAJ","ASHOKA","BAJAJHIND","BALMLAWRIE","CIGNITITEC","DCAL","DHANI","ECLERX","EIDPARRY","ENGINERSIN","EQUITAS","ESABINDIA","GMDCLTD","GODREJAGRO","GPPL","HATSUN","HEG","HINDOILEXP","HLEGLAS","IFCI","IOLCP","ITDC","JINDALSAW","JKLAKSHMI","JKTYRE","KAYNES","KIRLOSENG","KSB","KSL","LLOYDSME","LUMAXTECH","MAYURUNIQ","MMTC","NESCO","NLCINDIA","PFOCUS","PRAKASH","RENUKA","SAREGAMA","SHOPERSTOP","SOUTHWEST","SUNFLAG","TATAMETALI","TATVA","TIINDIA","TRITURBINE","UCOBANK","UFLEX","VGUARD","WELSPUNLIV","ZENTEC","AAREYDRUGS","ADFFOODS","ADL","AHLADA","AHLUCONT","AIAENG","AJMERA","ALICON","ALKALI","ALOKINDS","AMBIKA","ANDHRSUGAR","ANUP","APCOTEX","APOLLOPIPE","ARVIND","ARVINDFASN","ASHIANA","ASTEC","ATULAUTO","AURIONPRO","AVTNPL","BAGFILMS","BANARISUG","BANCOINDIA","BASF","BBL","BBOX","BCG","BFINVEST","BGRENERGY","BHAGCHEM","BHARATWIRE","BIGBLOC","BIRLACABLE","BLKASHYAP","BOMDYEING","BORORENEW","BUTTERFLY","CAMLINFINE","CANTABIL","CAPACITE","CDSL","CENTURYPLY","CHOLAFIN","DAMODARIND","DBL","DCMSHRIRAM","DHANUKA","DLINKINDIA","DODLA","DPSCLTD","DYNAMATECH","EIDPARRY","EMKAY","ENDURANCE","EQUITASBNK","ERIS","ESTER","FCL","GALAXYSURF","GICRE","GIPCL","GPIL","HATHWAY","HIKAL","HMT","HSCL","HUHTAMAKI","IFBAGRO","JMA","JSL","JSLHISAR","KANSAINER","KOLTEPATIL","KTKBANK","LAOPALA","LGBBROSLTD","LUMAXIND","LUXIND","MAHABANK","MAHLOG","MINDACORP","MOLDTECH","OAL","AAREYDRUGS","ADFFOODS","BALAMINES","BATAINDIA","BAYERCROP","BDL","BIKAJI","BLUESTARCO","BSE","CAMS","CAMPUS","CARBORUNIV","CASTROLIND","CCL","CEAT","CENTRALBK","CERA","CESC","CGCL","CHALET","CHAMBLFERT","CHEMPLASTS","CHENNPETRO","CHOICEIN","CHOLAFIN","CLEAN","COCHINSHIP","COFORGE","CRAFTSMAN","CREDITACC","CROMPTON","CSBBANK","CUPID","CYIENT","DATAPATTNS","DBCORP","DEEPAKFERT","DELTACORP","ELECON","EQUITASBNK","GNFC","GODREJPROP","HFCL","IEX","IDFCFIRSTB","IRCON","IRFC","KARURVYSYA","KFINTECH","LEMONTREE","LTF","MANAPPURAM","MCX","MRPL","MUTHOOTFIN","NBCC","NHPC","OBEROIRLTY","PEL","PETRONET","PNBHOUSING","POLYCAB","PVRINOX","RBLBANK","RITES","RVNL","SAIL","SBICARD","SONACOMS","SOUTHBANK","TATACHEM","TITAGARH","UJJIVANSFB","UNOMINDA","VOLTAS","WELCORP","ZEEL"]
+# Login
+smart = SmartConnect(api_key=API_KEY)
+totp = pyotp.TOTP(TOTP_SECRET).now()
+smart.generateSession(CLIENT_ID, PWD, totp)
 
-# Dedup to get final 369
-STOCKS_5X = list(dict.fromkeys(RAW_LIST))
+# Token Map Load
+# तुझ्या repo मध्ये instruments.csv / token_map.json असेल तर ते load करेल
+token_map = {}
+try:
+    # जर तुझ्याकडे token file असेल तर
+    df_map = pd.read_csv("ind_nifty500list.csv")
+    # example: symbol, token
+    for _, r in df_map.iterrows():
+        token_map[r['Symbol']] = str(r['Token'])
+except:
+    pass
 
-def check(sym):
-    token = token_map.get(sym)
-    if not token: return None
+def get_nse_list():
+    # 369 ची list तुझीच वापरणार, फक्त return
     try:
-        params = {"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":(datetime.now()-timedelta(days=5)).strftime("%Y-%m-%d %H:%M"),"todate":datetime.now().strftime("%Y-%m-%d %H:%M")}
-        data = obj.getCandleData(params)
-        if not data.get('data') or len(data['data']) < 30: return None
-        df = pd.DataFrame(data['data'], columns=['ts','o','h','l','c','v'])
-        df['ema9'] = df['c'].ewm(span=9).mean()
-        df['ema15'] = df['c'].ewm(span=15).mean()
-        df['vwap'] = (df['c']*df['v']).cumsum()/df['v'].cumsum()
-        df['vol20'] = df['v'].rolling(20).mean()
-        df = df.tail(75)
-        last = df.iloc[-1]; prev = df.iloc[-2]
-        if last['c'] < 50: return None
-        if last['v'] < 20000: return None
-        if last['vol20']==0 or last['v'] < last['vol20']*1.8: return None
-        if abs(last['c']-last['vwap'])/last['vwap'] > 0.025: return None
-        volx = round(last['v']/last['vol20'],1)
-        if prev['ema9'] < prev['ema15'] and last['ema9'] > last['ema15'] and last['c'] > last['vwap']:
-            return {'sym': sym, 'side': "LONG", 'entry': last['c'], 'vwap': last['vwap'], 'volx': volx}
-        if prev['ema9'] > prev['ema15'] and last['ema9'] < last['ema15'] and last['c'] < last['vwap']:
-            return {'sym': sym, 'side': "SHORT", 'entry': last['c'], 'vwap': last['vwap'], 'volx': volx}
+        with open("nse_369.txt") as f:
+            syms = [x.strip() for x in f.read().split(",")]
+            return syms
+    except:
+        return list(token_map.keys())[:369]
+
+def analyze(sym):
+    try:
+        token = token_map.get(sym)
+        if not token: return None
+        
+        fdate = (ist_now()-datetime.timedelta(days=5)).strftime("%Y-%m-%d %H:%M")
+        tdate = ist_now().strftime("%Y-%m-%d %H:%M")
+        hist = smart.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIFTEEN_MINUTE","fromdate":fdate,"todate":tdate})
+        if not hist or 'data' not in hist: return None
+        df = pd.DataFrame(hist['data'], columns=['Time','Open','High','Low','Close','Volume'])
+        if len(df) < 30: return None
+
+        ltp = float(df['Close'].iloc[-1])
+        vol = float(df['Volume'].iloc[-1])
+
+        # --- LOOSE FILTER ---
+        if ltp < 20: return None
+        if vol < 5000: return None
+
+        avg_vol = df['Volume'].iloc[-20:-1].mean()
+        volx = vol / (avg_vol+1)
+        if volx < 1.0:  # आधी 1.8 होता, आता 1.0 केला
+            return None
+
+        # Indicators
+        df['EMA9'] = df['Close'].ewm(9).mean()
+        df['VWAP'] = ((df['High']+df['Low']+df['Close'])/3 * df['Volume']).cumsum() / df['Volume'].cumsum()
+        delta = df['Close'].diff()
+        gain = delta.clip(lower=0).ewm(alpha=1/14).mean()
+        loss = abs(delta.clip(upper=0)).ewm(alpha=1/14).mean()
+        df['RSI'] = 100 - (100 / (1 + gain/loss))
+
+        c = df.iloc[-2]
+        body = abs(c['Close']-c['Open'])+1
+        low_p = min(c['Open'],c['Close'])-c['Low']
+        pat = "HAMMER" if (low_p>body*1.2 and c['Close']>c['Open']) else ""
+
+        ema9 = df['EMA9'].iloc[-1]
+        ema9_prev = df['EMA9'].iloc[-2]
+        rsi = df['RSI'].iloc[-1]
+        vwap = df['VWAP'].iloc[-1]
+        close = df['Close'].iloc[-1]
+
+        buy_score = 0
+        if close > ema9: buy_score+=1
+        if ema9 > ema9_prev: buy_score+=1
+        if rsi > 50: buy_score+=1
+        if close > vwap: buy_score+=1
+
+        sell_score = 0
+        if close < ema9: sell_score+=1
+        if ema9 < ema9_prev: sell_score+=1
+        if rsi < 50: sell_score+=1
+        if close < vwap: sell_score+=1
+
+        # Score 2 वर आणला - आधी 4 होता
+        if buy_score >= 2:
+            return {"type":"BUY","symbol":sym,"score":buy_score,"pat":pat,"ltp":ltp,"sl":ltp*0.985,"tp":ltp*1.02,"volx":round(volx,2)}
+        if sell_score >= 2:
+            return {"type":"SELL","symbol":sym,"score":sell_score,"pat":pat,"ltp":ltp,"sl":ltp*1.015,"tp":ltp*0.98,"volx":round(volx,2)}
         return None
-    except: return None
+    except:
+        return None
 
-results = []
-with ThreadPoolExecutor(max_workers=15) as exe:
-    futures = {exe.submit(check, s): s for s in STOCKS_5X}
-    for f in as_completed(futures):
-        r = f.result()
-        if r: results.append(r)
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE) as f:
+                st=json.load(f)
+                if st['date']==ist_now().strftime("%Y-%m-%d"): return st
+        except: pass
+    return {"date":ist_now().strftime("%Y-%m-%d"),"active":[],"closed":[]}
 
-now_ist = datetime.now() + timedelta(hours=5, minutes=30)
-time_str = now_ist.strftime("%H:%M")
+state = load_state()
+universe = get_nse_list()
+print(f"Checked {len(universe)} stocks")
 
-if results:
-    for trade in results[:5]:
-        sl = round(trade['vwap']*0.997,2) if trade['side']=="LONG" else round(trade['vwap']*1.003,2)
-        send_telegram(f"OK {trade['sym']} {trade['side']} @ {trade['entry']} VWAP {round(trade['vwap'],2)} SL {sl} Vol {trade['volx']}x {time_str}")
+buys=[]; sells=[]
+for sym in universe:
+    if any(tr["symbol"]==sym for tr in state["active"]): continue
+    res = analyze(sym)
+    if res:
+        if res["type"]=="BUY": buys.append(res)
+        else: sells.append(res)
+
+if buys or sells:
+    msg = f"Scanner {ist_now().strftime('%d-%b %H:%M')}\n"
+    for b in buys[:5]:
+        msg+=f"🟢 BUY {b['symbol']} @ {b['ltp']:.2f} SL {b['sl']:.2f} TP {b['tp']:.2f} Volx {b['volx']} {b['pat']}\n"
+    for s in sells[:5]:
+        msg+=f"🔴 SELL {s['symbol']} @ {s['ltp']:.2f} SL {s['sl']:.2f} TP {s['tp']:.2f} Volx {s['volx']}\n"
+    send_tg(msg)
+    print(msg)
 else:
-    send_telegram(f"{time_str} - NO TRADE ({len(STOCKS_5X)}) Checked >50Rs Vol>20k Volx>1.8x") 
+    # आता No Trade आला तरी Volx 1.0 दाखवेल
+    msg = f"{ist_now().strftime('%H:%M')} - NO TRADE ({len(universe)}) Checked >20Rs Vol>5k Volx>1.0x"
+    send_tg(msg)
+    print(msg) 
