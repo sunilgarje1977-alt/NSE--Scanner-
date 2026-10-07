@@ -19,7 +19,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install smartapi-python pyotp pandas requests pytz logzero
+          pip install --upgrade pip
+          pip install logzero websocket-client websockets
+          pip install smartapi-python pyotp pandas requests pytz
+
       - name: Run Scanner
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
@@ -29,4 +32,4 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python scanner.py
+          python scanner.py 
