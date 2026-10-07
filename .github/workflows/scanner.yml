@@ -1,13 +1,14 @@
-name: BSE 500 On-Time Scanner
+name: NSE 500 On-Time Scanner
 
 on:
   schedule:
-    - cron: '*/5 3-10 * * 1-5'
+    - cron: '*/2 3-10 * * 1-5'  # दर 2 मिनिटाला - Fast!
   workflow_dispatch:
 
 jobs:
   scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 4  # 4 मिनिटात संपला पाहिजे
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -20,8 +21,8 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install logzero websocket-client websockets
-          pip install smartapi-python pyotp pandas requests pytz
+          pip install logzero websocket-client
+          pip install SmartApi-python pyotp pandas requests pytz python-dotenv
 
       - name: Run Scanner
         env:
@@ -32,4 +33,4 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python scanner.py 
+          python scanner.py
