@@ -19,8 +19,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install smartapi-python pyotp pandas requests pytz
-
+          pip install smartapi-python pyotp pandas requests pytz logzero
       - name: Run Scanner
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
