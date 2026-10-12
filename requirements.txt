@@ -1,5 +1,7 @@
-SmartApi-Python
+smartapi-python
 pyotp
 pandas
 requests
-python-dotenv 
+pytz
+logzero
+websocket-client
