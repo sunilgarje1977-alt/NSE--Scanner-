@@ -1,36 +1,42 @@
-name: NSE 500 On-Time Scanner
+name: NSE On-Time Scanner
 
 on:
-  schedule:
-    - cron: '*/2 3-10 * * 1-5'  # दर 2 मिनिटाला - Fast!
   workflow_dispatch:
+  schedule:
+    - cron: '*/5 3-10 * * 1-5'  # Every 5 min
+
+concurrency:
+  group: scanner
+  cancel-in-progress: true
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 4  # 4 मिनिटात संपला पाहिजे
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+      
+      - name: Check Market Hours IST
+        run: |
+          IST_HOUR=$(TZ='Asia/Kolkata' date +'%H')
+          IST_MIN=$(TZ='Asia/Kolkata' date +'%M')
+          IST_DAY=$(TZ='Asia/Kolkata' date +'%u')
+          echo "IST Time: $IST_HOUR:$IST_MIN Day: $IST_DAY"
+          # Saturday=6, Sunday=7 - Don't run
+          if [ $IST_DAY -gt 5 ]; then echo "Weekend - Skip"; exit 0; fi
+          # Before 9:15 or After 15:35 - Don't run
+          if [ $IST_HOUR -lt 9 ] || ([ $IST_HOUR -eq 9 ] && [ $IST_MIN -lt 15 ]); then echo "Before Market"; exit 0; fi
+          if [ $IST_HOUR -gt 15 ] || ([ $IST_HOUR -eq 15 ] && [ $IST_MIN -gt 35 ]); then echo "After Market"; exit 0; fi
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install logzero websocket-client
-          pip install SmartApi-python pyotp pandas requests pytz python-dotenv
-
-      - name: Run Scanner
+          
+      - run: pip install smartapi-python pyotp pandas requests pytz
+      - run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python scanner.py
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }} 
