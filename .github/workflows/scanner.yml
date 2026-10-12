@@ -1,37 +1,16 @@
 name: NSE On-Time Scanner
-
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 3-10 * * 1-5'  # Every 5 min
-
-concurrency:
-  group: scanner
-  cancel-in-progress: true
-
+    - cron: '*/5 3-10 * * 1-5'
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
-      - name: Check Market Hours IST
-        run: |
-          IST_HOUR=$(TZ='Asia/Kolkata' date +'%H')
-          IST_MIN=$(TZ='Asia/Kolkata' date +'%M')
-          IST_DAY=$(TZ='Asia/Kolkata' date +'%u')
-          echo "IST Time: $IST_HOUR:$IST_MIN Day: $IST_DAY"
-          # Saturday=6, Sunday=7 - Don't run
-          if [ $IST_DAY -gt 5 ]; then echo "Weekend - Skip"; exit 0; fi
-          # Before 9:15 or After 15:35 - Don't run
-          if [ $IST_HOUR -lt 9 ] || ([ $IST_HOUR -eq 9 ] && [ $IST_MIN -lt 15 ]); then echo "Before Market"; exit 0; fi
-          if [ $IST_HOUR -gt 15 ] || ([ $IST_HOUR -eq 15 ] && [ $IST_MIN -gt 35 ]); then echo "After Market"; exit 0; fi
-
       - uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-          
-      - run: pip install smartapi-python pyotp pandas requests pytz logzero pandas requests pytz
+        with: {python-version: '3.10'}
+      - run: pip install -r requirements.txt
       - run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
@@ -39,4 +18,4 @@ jobs:
           ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }} 
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
