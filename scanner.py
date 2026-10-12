@@ -4,6 +4,7 @@ from SmartApi import SmartConnect
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Secrets
 API_KEY = os.getenv("ANGEL_API_KEY")
 CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
 PASSWORD = os.getenv("ANGEL_PASSWORD")
@@ -13,96 +14,97 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 def send_tele(msg):
     try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg}, timeout=15)
-    except: pass
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
+    except:
+        pass
 
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.now(ist)
-send_tele(f"🚀 NSE 500 Scanner Started {now.strftime('%H:%M')}")
+today_str = now.strftime("%Y-%m-%d")
 
-smart = SmartConnect(api_key=API_KEY)
-smart.generateSession(CLIENT_ID, PASSWORD, pyotp.TOTP(TOTP_SECRET).now())
+# Login
+try:
+    smart = SmartConnect(api_key=API_KEY)
+    smart.generateSession(CLIENT_ID, PASSWORD, pyotp.TOTP(TOTP_SECRET).now())
+except Exception as e:
+    send_tele(f"❌ Login Fail: {e}")
+    exit()
 
-# ===== FULL NSE 500 TOKENS - READY =====
+# 100 Most Active Stocks - NIACL Add केलंय
 TOKENS = {
-"RELIANCE":"2885","TCS":"11536","HDFCBANK":"1333","ICICIBANK":"4963","INFY":"1594","HINDUNILVR":"1394","SBIN":"3045","BHARTIARTL":"10604","BAJFINANCE":"317","ITC":"1660",
-"KOTAKBANK":"1922","LT":"11483","ASIANPAINT":"236","AXISBANK":"5900","MARUTI":"10999","DMART":"14035","ADANIENT":"25","SUNPHARMA":"3350","TITAN":"3506","ULTRACEMCO":"11532",
-"BAJAJFINSV":"16669","WIPRO":"3787","ONGC":"2475","NTPC":"11630","HCLTECH":"7229","POWERGRID":"14977","M&M":"2031","TATAMOTORS":"3456","COALINDIA":"20374","ADANIPORTS":"15083",
-"JSWSTEEL":"11723","HINDALCO":"1363","GRASIM":"1232","CIPLA":"694","DIVISLAB":"10940","DRREDDY":"881","EICHERMOT":"910","BRITANNIA":"547","SHREECEM":"3103","BPCL":"526",
-"TATACONSUM":"3432","TATASTEEL":"3499","TECHM":"13538","UPL":"11287","SBILIFE":"21808","HDFCLIFE":"467","INDUSINDBK":"5258","VEDL":"3063","APOLLOHOSP":"157","BAJAJ-AUTO":"16669",
-"HEROMOTOCO":"1348","NESTLEIND":"17963","JSWENERGY":"12127","ADANIGREEN":"4510","ADANIPOWER":"3295","IOC":"1624","GAIL":"665","PIDILITIND":"6819","DABUR":"772","MARICO":"4068",
-"BERGERPAINT":"399","DLF":"14732","GODREJPROP":"10099","INDIGO":"11184","HAVELLS":"981","SIEMENS":"3150","ABB":"1","CUMMINSIND":"742","TATAPOWER":"3426","NHPC":"9418",
-"RECLTD":"15332","PFC":"15543","IRCTC":"13849","HAL":"23087","BEL":"148","BANKBARODA":"4668","PNB":"7178","CANBK":"1211","UNIONBANK":"3600","IDFCFIRSTB":"21825",
-"FEDERALBNK":"1023","BANDHANBNK":"22603","AUBANK":"24463","MUTHOOTFIN":"14810","CHOLAFIN":"12986","SRF":"3155","ATUL":"208","AARTIIND":"4","DEEPAKNTR":"1904","NAVINFLUOR":"1943",
-"BALKRISIND":"267","MRF":"10915","APOLLOTYRE":"106","ASHOKLEY":"212","TVSMOTOR":"3518","MOTHERSON":"4204","BOSCHLTD":"421","EXIDEIND":"1012","AMARAJABAT":"1041","VOLTAS":"3716",
-"BLUESTARCO":"396","DIXON":"17094","AMBER":"24208","PERSISTENT":"19237","COFORGE":"11543","MPHASIS":"1453","LTTS":"23095","TATAELXSI":"3458","LTIM":"17818","KPITTECH":"19788",
-"TATATECH":"28630","IDEA":"14366","ZOMATO":"26121","PAYTM":"24184","NYKAA":"24686","DELHIVERY":"24800","POLICYBZR":"25039","IRFC":"23115","RVNL":"25562","IRCON":"25168",
-"MAZAGON":"24978","COCHINSHIP":"19844","GRSE":"23205","BDL":"23136","BEML":"395","CONCOR":"4307","SAIL":"1260","NMDC":"11483","HINDCOPPER":"1219","NATIONALUM":"12507",
-"JINDALSTEL":"1185","JSL":"12603","TATASTEEL":"3499","APLAPOLLO":"10812","ASTRAL":"13108","POLYCAB":"23957","KEI":"11393","FINCABLES":"1099","VGUARD":"19003","CROMPTON":"20215",
-"HAVELLS":"981","WHIRLPOOL":"11351","TTKPRESTIG":"2056","BATAINDIA":"303","RELAXO":"13832","METROBRAND":"25990","TRENT":"1964","ABFRL":"5354","PAGEIND":"13061","RAYMOND":"3028",
-"VEDANTFASH":"26305","MANYAVAR":"26305","KALYANKJIL":"24329","TITAN":"3506","SHRIRAMFIN":"430","M&MFIN":"15285","LICHSGFIN":"12828","CANFINHOME":"13528","HUDCO":"19357","NHB":"9418",
-"ICICIGI":"18663","ICICIPRULI":"18908","HDFCAMC":"20302","NIPPONLIFE":"18467","UTIAMC":"23382","MCX":"19145","BSE":"22533","CDSL":"20840","CAMS":"23296","KFINTECH":"25878",
-"360ONE":"18069","ANANDRATHI":"27050","MOTILALOFS":"11373","IIFL":"19266","MUTHOOTFIN":"14810","MANAPPURAM":"2127","CREDITACC":"22178","SPANDANA":"24570","UJJIVANSFB":"22908","AUBANK":"24463",
-"EQUITASBNK":"25133","SURYODAY":"25586","ESAF":"27840","JUBLFOOD":"18038","DEVYANI":"25531","SAPPHIRE":"26370","WESTLIFE":"19189","BIKAJI":"26366","DEVYANI":"25531","DOMS":"28176",
-"BLUEJET":"28600","HONASA":"28320","MAMAIND":"28320","TATACHEM":"2253","COROMANDEL":"739","CHAMBLFERT":"436","GNFC":"981","GSFC":"1106","RCF":"1213","FACT":"11767",
-"DEEPAKFERT":"169","BALRAMCHIN":"326","RENUKA":"15258","EIDPARRY":"893","AVANTIFEED":"11375","APOLLOHOSP":"157","FORTIS":"10840","MAXHEALTH":"24026","MEDANTA":"26458","RAINBOW":"26607",
-"KIMS":"25041","LALPATHLAB":"13363","METROPOLIS":"21616","DRREDDY":"881","CIPLA":"694","SUNPHARMA":"3350","DIVISLAB":"10940","LAURUSLABS":"23405","GRANULES":"13588","AUROPHARMA":"275",
-"ZYDUSLIFE":"13270","IPCALAB":"11930","GLENMARK":"740","ALKEM":"16807","TORNTPHARM":"3502","AJANTPHARM":"68","PFIZER":"11376","ABBOTINDIA":"83","SANOFI":"15559","GLAXO":"510",
-"JBCHEPHARM":"15770","NATCOPHARM":"1810","DIVISLAB":"10940","STAR":"19126","SUZLON":"13453","INOXWIND":"23977","BORORENEW":"26585","WEBELSOLAR":"21850","TATAPOWER":"3426","ADANIGREEN":"4510",
-"ADANIENSOL":"27672","NTPC":"11630","POWERGRID":"14977","NHPC":"9418","SJVN":"16288","THYROCARE":"18533","COALINDIA":"20374","ONGC":"2475","OIL":"11873","PETRONET":"11479",
-"IGL":"12283","MGL":"17822","GUJGASLTD":"14332","GSPL":"10636","TATAPOWER":"3426","ADANIENSOL":"27672","POWERGRID":"14977","NTPC":"11630","NHPC":"9418","SJVN":"16288",
-"INDIANB":"11532","HINDZINC":"1340","VEDL":"3063","NATIONALUM":"12507","HINDCOPPER":"1219","SAIL":"1260","JINDALSTEL":"1185","JSWSTEEL":"11723","TATASTEEL":"3499","JSL":"12603",
-"APLAPOLLO":"10812","ASTRAL":"13108","POLYCAB":"23957","KEI":"11393","FINCABLES":"1099","VGUARD":"19003","CROMPTON":"20215","DIXON":"17094","AMBER":"24208","KAYNES":"26567",
-"SYRMA":"26829","AVALON":"27785","CYIENTDLM":"28092","IDEA":"14366","BHARTIARTL":"10604","INDUS":"1579","TATACOMM":"13637","HFCL":"1092","STERLITE":"3142","TEJASNET":"22973",
-"LT":"11483","LTTS":"23095","TATAELXSI":"3458","KPITTECH":"19788","TATATECH":"28630","LTIM":"17818","PERSISTENT":"19237","COFORGE":"11543","MPHASIS":"1453","HCLTECH":"7229",
-"TCS":"11536","INFY":"1594","WIPRO":"3787","TECHM":"13538","LTTS":"23095","CYIENT":"10649","ZENSAR":"11301","MASTEK":"13969","SONATSOFTW":"3269","BIRLASOFT":"10994",
-"BSOFT":"10994","HGS":"1022","FIRSTSOURCE":"12806","AFFLE":"23184","TANLA":"16547","ROUTE":"23765","HAPPIESTMIND":"23568","INTELLECT":"20756","NEWGEN":"24562","RATEGAIN":"26098",
-"MAPMYINDIA":"26136","NAZARA":"25076","EASEMYTRIP":"25692","IRCTC":"13849","ZOMATO":"26121","PAYTM":"24184","NYKAA":"24686","DELHIVERY":"24800","POLICYBZR":"25039","CARTRADE":"25469",
-"FINO":"25387","SULA":"26966","CAMLINFINE":"11532","TATACHEM":"2253","COROMANDEL":"739","CHAMBLFERT":"436","GNFC":"981","GSFC":"1106","RCF":"1213","FACT":"11767",
-"DEEPAKFERT":"169","BALRAMCHIN":"326","RENUKA":"15258","EIDPARRY":"893","AVANTIFEED":"11375","APOLLOHOSP":"157","FORTIS":"10840","MAXHEALTH":"24026","MEDANTA":"26458","RAINBOW":"26607",
-"KIMS":"25041","LALPATHLAB":"13363","METROPOLIS":"21616","DRREDDY":"881","CIPLA":"694","SUNPHARMA":"3350","DIVISLAB":"10940","LAURUSLABS":"23405","GRANULES":"13588","AUROPHARMA":"275"
+"RELIANCE":"2885","TCS":"11536","HDFCBANK":"1333","ICICIBANK":"4963","INFY":"1594","SBIN":"3045","BHARTIARTL":"10604","ITC":"1660","LT":"11483","BAJFINANCE":"317","MARUTI":"10999","TATAMOTORS":"3456","SUNPHARMA":"3350","TITAN":"3506","ULTRACEMCO":"11532","WIPRO":"3787","ONGC":"2475","NTPC":"11630","HCLTECH":"7229","POWERGRID":"14977","M&M":"2031","JSWSTEEL":"11723","HINDALCO":"1363","CIPLA":"694","DIVISLAB":"10940","TATASTEEL":"3499","TECHM":"13538","ADANIENT":"25","ADANIPORTS":"15083","AXISBANK":"5900","KOTAKBANK":"1922","JSWENERGY":"12127","TATAPOWER":"3426","NHPC":"9418","RECLTD":"15332","PFC":"15543","IRCTC":"13849","HAL":"23087","BEL":"148","BANKBARODA":"4668","PNB":"7178","FEDERALBNK":"1023","AUBANK":"24463","DLF":"14732","GODREJPROP":"10099","INDIGO":"11184","DMART":"14035","ZOMATO":"26121","IRFC":"23115","RVNL":"25562","SAIL":"1260","VEDL":"3063","NMDC":"11483","POLYCAB":"23957","PERSISTENT":"19237","COFORGE":"11543","DIXON":"17094","HAVELLS":"981","SIEMENS":"3150","ABB":"1","BSE":"22533","CDSL":"20840","TRENT":"1964","SRF":"3155","TVSMOTOR":"3518","MOTHERSON":"4204","PIDILITIND":"6819","DABUR":"772","SBILIFE":"21808","HDFCLIFE":"467","ICICIGI":"18663","LICHSGFIN":"12828","HUDCO":"19357","CONCOR":"4307","COCHINSHIP":"19844","BDL":"23136","IOC":"1624","GAIL":"665","BPCL":"526","NIACL":"15482","LICI":"15379","GICRE":"15438","NHPC":"9418","SJVN":"11373","IRB":"13611","HFCL":"3140","IDEA":"14366","YESBANK":"305","BANKBARODA":"4668","CANBK":"7041","UNIONBANK":"11868","IDFCFIRSTB":"11287"
 }
 
-def scan_one(item):
+def scan_stock(item):
     name, token = item
     try:
-        today = now.strftime("%Y-%m-%d")
-        hist = smart.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":f"{today} 09:15","todate":f"{today} 15:30"})
-        if not hist or 'data' not in hist or len(hist['data'])<26: return None
+        hist = smart.getCandleData({
+            "exchange": "NSE",
+            "symboltoken": token,
+            "interval": "FIVE_MINUTE",
+            "fromdate": f"{today_str} 09:15",
+            "todate": f"{today_str} 15:30"
+        })
+        if not hist or 'data' not in hist or len(hist['data']) < 25:
+            return None
+
         df = pd.DataFrame(hist['data'], columns=['t','O','H','L','C','V'])
-        df['VWAP'] = (df['V'] * (df['H']+df['L']+df['C'])/3).cumsum() / df['V'].cumsum()
-        df['EMA9'] = df['C'].ewm(9).mean()
-        df['EMA15'] = df['C'].ewm(15).mean()
-        df['VAVG'] = df['V'].rolling(20).mean()
-        d=df['C'].diff()
-        rs = d.where(d>0,0).rolling(14).mean() / -d.where(d<0,0).rolling(14).mean()
-        df['RSI'] = 100 - (100/(1+rs))
-        c=df.iloc[-1]; p=df.iloc[-2]
-        if c['C']<30: return None
-        vol_ok = c['V'] > c['VAVG']*1.2
-        vwap_up = p['C']<=p['VWAP'] and c['C']>c['VWAP']
-        vwap_down = p['C']>=p['VWAP'] and c['C']<c['VWAP']
-        ema_up = p['EMA9']<=p['EMA15'] and c['EMA9']>c['EMA15']
-        ema_down = p['EMA9']>=p['EMA15'] and c['EMA9']<c['EMA15']
-        if vwap_up and ema_up and vol_ok and c['RSI']>=50:
-            return f"🟢 SUPER BUY {name} @ {c['C']:.2f} VOL {c['V']/c['VAVG']:.1f}x RSI{int(c['RSI'])}"
-        if vwap_down and ema_down and vol_ok and c['RSI']<=50:
-            return f"🔴 SUPER SELL {name} @ {c['C']:.2f} VOL {c['V']/c['VAVG']:.1f}x RSI{int(c['RSI'])}"
-    except Exception as e:
-        print(f"{name} err {e}")
+
+        # Indicators
+        df['EMA9'] = df['C'].ewm(span=9).mean()
+        df['EMA21'] = df['C'].ewm(span=21).mean()
+        df['VWAP'] = (df['V']*(df['H']+df['L']+df['C'])/3).cumsum() / df['V'].cumsum()
+        df['VOLAVG'] = df['V'].rolling(20).mean()
+
+        # RSI
+        d = df['C'].diff()
+        gain = d.where(d>0,0).rolling(14).mean()
+        loss = -d.where(d<0,0).rolling(14).mean()
+        df['RSI'] = 100 - (100 / (1 + gain/loss.replace(0,0.01)))
+
+        curr = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        if curr['C'] < 25: return None
+
+        vol_ratio = curr['V'] / curr['VOLAVG'] if curr['VOLAVG'] > 0 else 1
+        is_high_vol = vol_ratio >= 1.15
+
+        # ON-TIME LOGIC
+        # BUY Condition
+        if curr['C'] > curr['EMA9'] and curr['EMA9'] > curr['EMA21'] and curr['C'] > curr['VWAP']:
+            if curr['RSI'] > 55 and is_high_vol:
+                tag = "🚀 BREAKOUT" if curr['C'] > prev['H'] else "🟢 TREND"
+                return ("BUY", curr['RSI'], f"{tag} <b>{name}</b> @ {curr['C']:.2f}\nRSI:{curr['RSI']:.0f} | Vol:{vol_ratio:.1f}x | {now.strftime('%H:%M')}")
+
+        # SELL Condition
+        if curr['C'] < curr['EMA9'] and curr['EMA9'] < curr['EMA21'] and curr['C'] < curr['VWAP']:
+            if curr['RSI'] < 45 and is_high_vol:
+                return ("SELL", curr['RSI'], f"🔴 <b>{name}</b> @ {curr['C']:.2f}\nRSI:{curr['RSI']:.0f} | Vol:{vol_ratio:.1f}x | {now.strftime('%H:%M')}")
+
+    except:
         return None
 
-print(f"Scanning {len(TOKENS)} Stocks...")
-sigs=[]
-with ThreadPoolExecutor(max_workers=50) as ex:
-    futs={ex.submit(scan_one,it):it for it in TOKENS.items()}
+# Run
+buys, sells = [], []
+with ThreadPoolExecutor(max_workers=30) as ex:
+    futs = {ex.submit(scan_stock, it): it for it in TOKENS.items()}
     for f in as_completed(futs):
-        r=f.result()
-        if r: sigs.append(r)
+        res = f.result()
+        if res:
+            if res[0] == "BUY": buys.append(res)
+            else: sells.append(res)
 
-if sigs:
-    for s in sigs: 
-        print(s)
-        send_tele(s)
+buys = sorted(buys, key=lambda x: x[1], reverse=True)[:8]
+sells = sorted(sells, key=lambda x: x[1])[:8]
+
+# Telegram Send
+if buys or sells:
+    header = f"📈 <b>On-Time Scan {now.strftime('%d-%b %H:%M')}</b> ({len(TOKENS)} stocks)\n\n"
+    body = ""
+    for _,_,m in buys: body += m + "\n\n"
+    for _,_,m in sells: body += m + "\n\n"
+    send_tele(header + body)
 else:
-    send_tele(f"ℹ️ Checked {len(TOKENS)} Stocks - No SUPER BUY/SELL at {now.strftime('%H:%M')}") 
+    send_tele(f"⏳ {now.strftime('%H:%M')} - No Setup ({len(TOKENS)} checked) - Sideways Market")  
