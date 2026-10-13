@@ -1,17 +1,20 @@
-name: NSE On-Time Scanner
+name: NSE On-Time BSE 500
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 3-10 * * 1-5'
+    - cron: '*/2 3-15 * * 1-5'
+    - cron: '*/2 4-9 * * 1-5'
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
-        with: {python-version: '3.10'}
+        with:
+          python-version: '3.10'
       - run: pip install -r requirements.txt
-      - run: python scanner.py
+      - name: Run Scanner
+        run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
