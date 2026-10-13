@@ -23,7 +23,7 @@ today_str=now.strftime("%Y-%m-%d")
 smart=SmartConnect(api_key=API_KEY)
 smart.generateSession(CLIENT_ID, PASSWORD, pyotp.TOTP(TOTP_SECRET).now())
 
-# NSE 1000 Tokens
+# NSE 1000 List
 master = requests.get("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json", timeout=30).json()
 tokens_all = {}
 for s in master:
@@ -51,50 +51,42 @@ def scan(item):
         turnover=curr['V']*curr['C']
 
         if curr['C'] < 50: return None
-        if turnover < 1000000: return None # 10L पेक्षा कमी असेल तर नको
+        if turnover < 1200000: return None
+        if vol_ratio < 1.8: return None
 
-        # === 1. EARLY BUY @ 640 - 10:00 वाला - NUCLEUS साठी ===
-        # Condition: आधी VWAP खाली, आता VWAP वर + Green
-        if prev['C'] < prev['VWAP'] and curr['C'] > curr['VWAP'] and curr['C'] > curr['O'] and curr['RSI'] >= 48 and vol_ratio >= 1.5:
-            entry=curr['C']; sl=curr['VWAP']*0.995
+        cross_up = prev['EMA9'] < prev['VWAP'] and curr['EMA9'] > curr['VWAP']
+        cross_down = prev['EMA9'] > prev['VWAP'] and curr['EMA9'] < curr['VWAP']
+
+        # BUY - RSI 60 Match
+        if cross_up and curr['C'] > curr['EMA9'] and curr['C'] > curr['O'] and 60 <= curr['RSI'] <= 78:
+            entry=curr['C']
+            sl = max(curr['EMA9']*0.998, curr['L']*0.998)
+            if sl < entry*0.992: sl = entry*0.992
             risk=entry-sl
-            if 0<risk and risk/entry<=0.015:
+            if 0<risk and risk/entry <= 0.01:
                 t1=entry+risk*2.5
-                return f"🟢 <b>{name} EARLY BUY @ {entry:.1f}</b> {pct:+.1f}% Vol:{vol_ratio:.1f}x Rs:{turnover/100000:.0f}L RSI:{int(curr['RSI'])} {now.strftime('%H:%M')}\nSL:{sl:.1f} VWAP Break T1:{t1:.1f}"
+                return f"🟢 <b>{name} BUY @ {entry:.1f}</b> {pct:+.1f}% Vol:{vol_ratio:.1f}x RSI:{int(curr['RSI'])} Rs:{turnover/100000:.0f}L {now.strftime('%H:%M')}\nSL:{sl:.1f} (9EMA) T1:{t1:.1f} T2:Trail"
 
-        # === 2. STRONG BUY - 12:30 वाला 653 ===
-        if vol_ratio >= 1.8 and curr['C']>curr['O'] and 55<=curr['RSI']<=80 and curr['C']>curr['EMA9'] and curr['EMA9']>curr['VWAP']:
-            entry=curr['C']; sl=min(curr['L'], curr['VWAP']); risk=entry-sl
-            if 0<risk and risk/entry<=0.015:
-                t1=entry+risk*2.5
-                return f"🟢 <b>{name} STRONG BUY @ {entry:.1f}</b> {pct:+.1f}% Vol:{vol_ratio:.1f}x Rs:{turnover/100000:.0f}L RSI:{int(curr['RSI'])} {now.strftime('%H:%M')}\nSL:{sl:.1f} T1:{t1:.1f} T2:Trail"
-
-        # === 3. SELL दोन्ही ===
-        if prev['C'] > prev['VWAP'] and curr['C'] < curr['VWAP'] and curr['C'] < curr['O'] and curr['RSI'] <= 52 and vol_ratio >= 1.5:
-            entry=curr['C']; sl=curr['VWAP']*1.005
+        # SELL - RSI 40 Match
+        if cross_down and curr['C'] < curr['EMA9'] and curr['C'] < curr['O'] and 22 <= curr['RSI'] <= 40:
+            entry=curr['C']
+            sl = min(curr['EMA9']*1.002, curr['H']*1.002)
+            if sl > entry*1.008: sl = entry*1.008
             risk=sl-entry
-            if 0<risk:
+            if 0<risk and risk/entry <= 0.01:
                 t1=entry-risk*2.5
-                return f"🔴 <b>{name} EARLY SELL @ {entry:.1f}</b> {pct:+.1f}% Vol:{vol_ratio:.1f}x Rs:{turnover/100000:.0f}L RSI:{int(curr['RSI'])} {now.strftime('%H:%M')}\nSL:{sl:.1f} VWAP Break T1:{t1:.1f}"
+                return f"🔴 <b>{name} SELL @ {entry:.1f}</b> {pct:+.1f}% Vol:{vol_ratio:.1f}x RSI:{int(curr['RSI'])} Rs:{turnover/100000:.0f}L {now.strftime('%H:%M')}\nSL:{sl:.1f} (9EMA) T1:{t1:.1f} T2:Trail"
 
-        if vol_ratio >= 1.8 and curr['C']<curr['O'] and 20<=curr['RSI']<=48 and curr['C']<curr['EMA9'] and curr['EMA9']<curr['VWAP']:
-            entry=curr['C']; sl=max(curr['H'], curr['VWAP']); risk=sl-entry
-            if 0<risk and risk/entry<=0.015:
-                t1=entry-risk*2.5
-                return f"🔴 <b>{name} STRONG SELL @ {entry:.1f}</b> {pct:+.1f}% Vol:{vol_ratio:.1f}x Rs:{turnover/100000:.0f}L RSI:{int(curr['RSI'])} {now.strftime('%H:%M')}\nSL:{sl:.1f} T1:{t1:.1f} T2:Trail"
-
-    except Exception as e:
-        return None
+    except: return None
 
 results=[]
 with ThreadPoolExecutor(max_workers=35) as ex:
-    futures={ex.submit(scan,it):it for it in all_tokens}
-    for f in as_completed(futures):
+    for f in as_completed({ex.submit(scan,it):it for it in all_tokens}):
         r=f.result()
         if r: results.append(r)
 
 if results:
-    header=f"⚡️ <b>NSE ALL V15 {now.strftime('%H:%M:%S')}</b> {len(all_tokens)} Checked\nEARLY 640 | STRONG 653 | Vol 1.5x+\n\n"
-    send_tele(header + "\n\n".join(results[:20]))
+    header=f"⚡️ <b>NSE V18 {now.strftime('%H:%M:%S')}</b> {len(all_tokens)} Checked\n9EMAxVWAP | Vol 1.8x | RSI 60/40 | 12L Min\n\n"
+    send_tele(header + "\n\n".join(results[:15]))
 else:
-    send_tele(f"⏳ {now.strftime('%H:%M')} No Setup - {len(all_tokens)} Checked")
+    send_tele(f"⏳ {now.strftime('%H:%M')} No Setup (RSI 60 + Vol 1.8x Not Matched) - {len(all_tokens)} Checked")  
