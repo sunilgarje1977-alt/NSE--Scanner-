@@ -4,80 +4,81 @@ from SmartApi import SmartConnect
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Secrets Load
-API_KEY = os.getenv("ANGEL_API_KEY")
-CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
-PASSWORD = os.getenv("ANGEL_PASSWORD")
-TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+API_KEY=os.getenv("ANGEL_API_KEY")
+CLIENT_ID=os.getenv("ANGEL_CLIENT_ID")
+PASSWORD=os.getenv("ANGEL_PASSWORD")
+TOTP_SECRET=os.getenv("ANGEL_TOTP_SECRET")
+BOT_TOKEN=os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID=os.getenv("TELEGRAM_CHAT_ID")
 
 def send_tele(msg):
+    requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg, "parse_mode":"HTML"}, timeout=10)
+
+ist=pytz.timezone('Asia/Kolkata')
+now=datetime.now(ist)
+today_str=now.strftime("%Y-%m-%d")
+
+smart=SmartConnect(api_key=API_KEY)
+smart.generateSession(CLIENT_ID, PASSWORD, pyotp.TOTP(TOTP_SECRET).now())
+
+# BSE 500 - तुझा FSL पण आहे
+SYMBOLS = ["FSL","NIACL","RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","SBIN","BHARTIARTL","ITC","LT","BAJFINANCE","MARUTI","TATAMOTORS","SUNPHARMA","TITAN","WIPRO","ONGC","HCLTECH","POWERGRID","M&M","JSWSTEEL","HINDALCO","TATASTEEL","TECHM","ADANIENT","ADANIPORTS","AXISBANK","KOTAKBANK","TATAPOWER","RECLTD","PFC","IRCTC","HAL","BEL","BANKBARODA","PNB","FEDERALBNK","DLF","INDIGO","DMART","ZOMATO","IRFC","RVNL","SAIL","VEDL","POLYCAB","BSE","CDSL","TRENT","TVSMOTOR","MOTHERSON","SBILIFE","HUDCO","CONCOR","BDL","IOC","GAIL","BPCL","LICI","YESBANK","IDEA","HFCL","SUZLON","BHEL","MAZDOCK","COCHINSHIP","GRSE","NBCC","JPOWER","KPIGREEN","JPPOWER","GMRINFRA","ADANIPOWER","TATAELXSI","LTTS","KPITTECH","TATATECH","INTELLECT","BSOFT","COFORGE","PERSISTENT","MPHASIS","FIRSTSOURCE","ANGELONE","MCX","IEX","NUVAMA","LTF","MUTHOOTFIN","MANAPPURAM","PAYTM","NYKAA","DELHIVERY","INDIAMART","AFFLE","TANLA","ROUTE","TEJASNET","TATACOMM","HEXAWARE","TATACONSUM","VBL","TITAN","KALYANKJIL","BATA","CAMPUS","IRB","NHPC","SJVN","HUDCO","NCC","ADANIGREEN","ATGL","ACC","AMBUJACEM","SHREECEM","JKCEMENT","GRASIM","HINDZINC","COALINDIA","OIL","IGL","MGL","PETRONET","NTPC","TORNTPOWER","CESC","BAJAJ-AUTO","HEROMOTOCO","EICHERMOT","ASHOKLEY","BHARATFORG","SONACOMS","UNOMINDA","BALKRISIND","MRF","SUNPHARMA","DRREDDY","CIPLA","LUPIN","AUROPHARMA","ZYDUSLIFE","DIVISLAB","BIOCON","SYNGENE","NESTLEIND","BRITANNIA","DABUR","MARICO","GODREJCP","HINDUNILVR","DMART","TRENT","ABFRL","PAGEIND","TITAN","INDIGO","JIOFIN","INDUSTOWER","JETAIRWAYS","TATACOMM"]
+
+def get_token(sym):
     try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
+        r=smart.searchScrip("NSE", sym)
+        if r['data']: return sym, r['data'][0]['symboltoken']
     except: pass
+    return sym, None
 
-ist = pytz.timezone('Asia/Kolkata')
-now = datetime.now(ist)
-today_str = now.strftime("%Y-%m-%d")
-
-# Login
-try:
-    smart = SmartConnect(api_key=API_KEY)
-    smart.generateSession(CLIENT_ID, PASSWORD, pyotp.TOTP(TOTP_SECRET).now())
-    send_tele(f"🚀 <b>Scanner v3 Started {now.strftime('%H:%M')}</b> - BUY/SELL Mode")
-except Exception as e:
-    send_tele(f"❌ Login Fail: {e}")
-    exit()
-
-# 100 Stocks with NIACL
-TOKENS = {
-"RELIANCE":"2885","TCS":"11536","HDFCBANK":"1333","ICICIBANK":"4963","INFY":"1594","SBIN":"3045","BHARTIARTL":"10604","ITC":"1660","LT":"11483","BAJFINANCE":"317","MARUTI":"10999","TATAMOTORS":"3456","SUNPHARMA":"3350","TITAN":"3506","ULTRACEMCO":"11532","WIPRO":"3787","ONGC":"2475","NTPC":"11630","HCLTECH":"7229","POWERGRID":"14977","M&M":"2031","JSWSTEEL":"11723","HINDALCO":"1363","CIPLA":"694","DIVISLAB":"10940","TATASTEEL":"3499","TECHM":"13538","ADANIENT":"25","ADANIPORTS":"15083","AXISBANK":"5900","KOTAKBANK":"1922","TATAPOWER":"3426","RECLTD":"15332","PFC":"15543","IRCTC":"13849","HAL":"23087","BEL":"148","BANKBARODA":"4668","PNB":"7178","FEDERALBNK":"1023","AUBANK":"24463","DLF":"14732","INDIGO":"11184","DMART":"14035","ZOMATO":"26121","IRFC":"23115","RVNL":"25562","SAIL":"1260","VEDL":"3063","NMDC":"11483","POLYCAB":"23957","PERSISTENT":"19237","COFORGE":"11543","DIXON":"17094","HAVELLS":"981","SIEMENS":"3150","ABB":"1","BSE":"22533","CDSL":"20840","TRENT":"1964","SRF":"3155","TVSMOTOR":"3518","MOTHERSON":"4204","PIDILITIND":"6819","DABUR":"772","SBILIFE":"21808","HDFCLIFE":"467","ICICIGI":"18663","HUDCO":"19357","CONCOR":"4307","COCHINSHIP":"19844","BDL":"23136","IOC":"1624","GAIL":"665","BPCL":"526","NIACL":"15482","LICI":"15379","GICRE":"15438","YESBANK":"305","IDEA":"14366","HFCL":"3140"
-}
+tokens={}
+with ThreadPoolExecutor(max_workers=20) as ex:
+    for f in as_completed([ex.submit(get_token,s) for s in SYMBOLS]):
+        s,t=f.result()
+        if t: tokens[s]=t
 
 def scan(item):
-    name, token = item
+    name, token=item
     try:
-        hist = smart.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"FIVE_MINUTE","fromdate":f"{today_str} 09:15","todate":f"{today_str} 15:30"})
-        if not hist or 'data' not in hist or len(hist['data']) < 25: return None
-        df = pd.DataFrame(hist['data'], columns=['t','O','H','L','C','V'])
-        df['EMA9'] = df['C'].ewm(span=9).mean()
-        df['EMA21'] = df['C'].ewm(span=21).mean()
-        df['VWAP'] = (df['V']*(df['H']+df['L']+df['C'])/3).cumsum() / df['V'].cumsum()
-        df['VOLAVG'] = df['V'].rolling(20).mean()
-        d = df['C'].diff()
-        df['RSI'] = 100 - (100 / (1 + d.where(d>0,0).rolling(14).mean() / -d.where(d<0,0).rolling(14).mean().replace(0,0.01)))
-        curr = df.iloc[-1]
-        prev = df.iloc[-2]
-        if curr['C'] < 20: return None
-        vol = curr['V']/curr['VOLAVG'] if curr['VOLAVG']>0 else 1
+        # 1 MINUTE Candle - हाच On-Time चा Secret
+        hist=smart.getCandleData({"exchange":"NSE","symboltoken":token,"interval":"ONE_MINUTE","fromdate":f"{today_str} 09:15","todate":f"{today_str} 15:30"})
+        if not hist or 'data' not in hist or len(hist['data'])<20: return None
+        df=pd.DataFrame(hist['data'], columns=['t','O','H','L','C','V'])
+        df['EMA9']=df['C'].ewm(span=9).mean()
+        df['EMA21']=df['C'].ewm(span=21).mean()
+        df['VWAP']=(df['V']*(df['H']+df['L']+df['C'])/3).cumsum()/df['V'].cumsum()
+        df['VOLAVG']=df['V'].rolling(20).mean()
+        d=df['C'].diff()
+        df['RSI']=100-(100/(1+d.where(d>0,0).rolling(9).mean()/-d.where(d<0,0).rolling(9).mean().replace(0,0.01)))
 
-        # BUY: Price > EMA9 > EMA21 + VWAP + RSI>55
-        if curr['C'] > curr['EMA9'] > curr['EMA21'] and curr['C'] > curr['VWAP'] and curr['RSI']>55 and vol>=1.1:
-            tag = "🚀 BREAKOUT" if curr['C']>prev['H'] else "🟢 BUY"
-            return ("BUY", curr['RSI'], f"{tag} <b>{name}</b> @ {curr['C']:.1f} RSI:{int(curr['RSI'])} Vol:{vol:.1f}x")
-        # SELL: Price < EMA9 < EMA21 + VWAP + RSI<45
-        if curr['C'] < curr['EMA9'] < curr['EMA21'] and curr['C'] < curr['VWAP'] and curr['RSI']<45 and vol>=1.1:
-            return ("SELL", curr['RSI'], f"🔴 SELL <b>{name}</b> @ {curr['C']:.1f} RSI:{int(curr['RSI'])} Vol:{vol:.1f}x")
+        curr=df.iloc[-1]
+        prev=df.iloc[-2]
+        first=df.iloc[0]
+
+        # FSL Chart सारखा Logic
+        day_pct=(curr['C']-first['O'])/first['O']*100
+        vol_ratio=curr['V']/curr['VOLAVG'] if curr['VOLAVG']>0 else 1
+
+        # ON-TIME CONDITION - Candle Close होताच Trigger
+        # तुझ्या Chart मध्ये 09:20 ला: Price > White Line (EMA9), Yellow (EMA21), RSI 76, Volume मोठा - तोच हा
+        if curr['C']>curr['EMA9'] and curr['C']>curr['EMA21'] and curr['C']>curr['VWAP'] and curr['RSI']>62 and vol_ratio>1.4 and curr['C']>prev['H']:
+            return f"🚀 <b>{name} BREAKOUT</b> @ {curr['C']:.1f}\n+{day_pct:.2f}% | RSI:{int(curr['RSI'])} | Vol:{vol_ratio:.1f}x | {now.strftime('%H:%M:%S')} - ON TIME"
+
+        # Early Trend - 09:15 लाच
+        if day_pct>=0.8 and curr['C']>curr['EMA9'] and curr['RSI']>58 and curr['C']>curr['VWAP']:
+            return f"🟢 <b>{name}</b> @ {curr['C']:.1f} +{day_pct:.1f}% RSI:{int(curr['RSI'])} {now.strftime('%H:%M')}"
+
     except: return None
 
-buys, sells = [], []
-with ThreadPoolExecutor(max_workers=25) as ex:
-    futs = {ex.submit(scan, it): it for it in TOKENS.items()}
-    for f in as_completed(futs):
-        r = f.result()
-        if r:
-            if r[0]=="BUY": buys.append(r)
-            else: sells.append(r)
+results=[]
+with ThreadPoolExecutor(max_workers=30) as ex:
+    for f in as_completed({ex.submit(scan,it):it for it in tokens.items()}):
+        r=f.result()
+        if r: results.append(r)
 
-buys = sorted(buys, key=lambda x: x[1], reverse=True)[:8]
-sells = sorted(sells, key=lambda x: x[1])[:8]
-
-if buys or sells:
-    msg = f"📊 <b>Scan {now.strftime('%H:%M')} - {len(TOKENS)} Stocks</b>\n\n"
-    for _,_,m in buys: msg+=m+"\n\n"
-    for _,_,m in sells: msg+=m+"\n\n"
+if results:
+    msg=f"⚡️ <b>ON-TIME SCAN {now.strftime('%H:%M:%S')}</b> - BSE 500\n\n" + "\n\n".join(results[:12])
     send_tele(msg)
 else:
-    send_tele(f"⏳ {now.strftime('%H:%M')} - No Setup - Market Sideways")  
+    # Sideways असेल तर Message नको, फक्त Breakout ला पाठव
+    pass
