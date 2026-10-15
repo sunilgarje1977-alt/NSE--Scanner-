@@ -1,5 +1,6 @@
-yfinance
-pandas
 smartapi-python
 pyotp
+pandas
 requests
+yfinance
+lxml 
