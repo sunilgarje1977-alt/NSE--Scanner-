@@ -1,8 +1,5 @@
 name: NSE 500 Fast Scanner
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '*/5 3-10 * * 1-5'
+on: workflow_dispatch
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -11,14 +8,9 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      - run: pip install --upgrade pip
-      - run: pip install smartapi-python pyotp pandas requests
+      - run: pip install requests
       - name: Run
         env:
-          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
-          ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
-          ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
-          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python scanner.py
+        run: python scanner.py 
