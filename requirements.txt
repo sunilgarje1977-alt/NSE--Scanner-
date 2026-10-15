@@ -1,7 +1,5 @@
+yfinance
+pandas
 smartapi-python
 pyotp
-pandas
 requests
-pytz
-logzero
-websocket-client
