@@ -1,24 +1,24 @@
 import os, sys, subprocess
-for pkg in ["logzero","websocket-client"]:
+for p in ["logzero","websocket-client"]:
     try:
-        __import__("logzero" if pkg=="logzero" else "websocket")
+        __import__("logzero" if p=="logzero" else "websocket")
     except:
-        subprocess.check_call([sys.executable,"-m","pip","install",pkg])
+        subprocess.check_call([sys.executable,"-m","pip","install",p])
 
-import requests, traceback, math
+import requests, traceback
 from datetime import datetime, timedelta
 
 BOT = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
-def send(msg):
+def send(m):
     try:
-        base = "https://api.telegram.org/bot"+BOT+"/sendMessage"
-        requests.post(base, data={"chat_id":CHAT,"text":msg,"parse_mode":"Markdown"}, timeout=15)
+        u = "https://api.telegram.org/bot"+BOT+"/sendMessage"
+        requests.post(u, data={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"}, timeout=15)
     except: pass
-    print(msg)
+    print(m)
 
-def get_strike(price, typ="CE"):
+def strike(price, typ="CE"):
     if price < 500:
         step = 10
     elif price < 2000:
@@ -49,8 +49,8 @@ try:
     today = ist.strftime("%Y-%m-%d")
     now = ist.strftime("%Y-%m-%d %H:%M")
 
-    # Time Filter - 3 PM नंतर No Fresh
-    if ist.hour >= 15 and ist.minute > 15:
+    # 3:15 नंतर बंद
+    if ist.hour>=15 and ist.minute>15:
         send(f"Market Closing {ist.strftime('%H:%M')} IST - No Fresh Trade, Morning Signal Follow करा")
         exit(0)
 
@@ -63,32 +63,33 @@ try:
             cd = obj.getCandleData(hp)
             if not cd.get("data") or len(cd["data"])<15: continue
             df = pd.DataFrame(cd["data"], columns=["time","open","high","low","close","volume"])
-            for c in ["close","open","high","low","volume"]: df[c]=pd.to_numeric(df[c])
+            for c in ["close","open","high","low","volume"]:
+                df[c]=pd.to_numeric(df[c])
             df["typ"]=(df["high"]+df["low"]+df["close"])/3
             df["vwap"]=(df["typ"]*df["volume"]).cumsum()/df["volume"].cumsum()
             df["9ema"]=df["close"].ewm(span=9).mean()
-            delta=df["close"].diff()
-            gain=delta.where(delta>0,0).rolling(14).mean()
-            loss=-delta.where(delta<0,0).rolling(14).mean()
-            df["rsi"]=100-(100/(1+gain/loss))
+            d=df["close"].diff()
+            g=d.where(d>0,0).rolling(14).mean()
+            l=-d.where(d<0,0).rolling(14).mean()
+            df["rsi"]=100-(100/(1+g/l))
             c=df.iloc[-1]
 
-            # BUY - RSI 50-75 (Strong पण Overbought नाही)
+            # BUY - RSI 50 ते 75
             if c["close"]>c["vwap"] and c["vwap"]>c["9ema"] and c["rsi"]>=50 and c["rsi"]<=75 and c["close"]>c["open"]:
-                atm,best,step = get_strike(float(c["close"]),"CE")
+                atm,best,stp = strike(float(c["close"]),"CE")
                 msg = f"🟢 *{sym} BUY @ {c['close']:.1f}* | Bull\n"
                 msg += f"Close {c['close']:.1f} > VWAP {c['vwap']:.1f} | RSI {c['rsi']:.1f}\n\n"
-                msg += f"💥 *CE Strike:*\n• ATM: {atm} CE\n• *Best: {best} CE* (50-90 Premium)\n• Step {step} | OTM {best-atm}\n\n"
-                msg += f"• Cash BUY\n• {sym} CE Buy\n• Nifty CE @ 50-90"
+                msg += f"💥 *CE Strike:*\n• ATM: {atm} CE\n• *Best: {best} CE* (50-90)\n• Step {stp}\n\n"
+                msg += f"• Cash BUY\n• {sym} CE Buy"
                 send(msg)
 
-            # SELL - RSI 30-48 (Weak पण Oversold नाही - तुझ्या Screenshot चा Fix)
+            # SELL - RSI 30 ते 48 (तुझ्या 27 RSI चा Fix)
             if c["close"]<c["vwap"] and c["vwap"]<c["9ema"] and c["rsi"]>=30 and c["rsi"]<=48 and c["close"]<c["open"]:
-                atm,best,step = get_strike(float(c["close"]),"PE")
+                atm,best,stp = strike(float(c["close"]),"PE")
                 msg = f"🔴 *{sym} SELL @ {c['close']:.1f}* | Bear\n"
                 msg += f"Close {c['close']:.1f} < VWAP {c['vwap']:.1f} | RSI {c['rsi']:.1f}\n\n"
-                msg += f"💥 *PE Strike:*\n• ATM: {atm} PE\n• *Best: {best} PE* (50-90 Premium)\n\n"
-                msg += f"• Cash SELL\n• {sym} PE Put Buy"
+                msg += f"💥 *PE Strike:*\n• ATM: {atm} PE\n• *Best: {best} PE* (50-90)\n\n"
+                msg += f"• Cash SELL\n• {sym} PE Buy"
                 send(msg)
 
         except: continue
@@ -99,4 +100,4 @@ try:
 except Exception as e:
     err=traceback.format_exc()[-700:]
     send(f"Error:\n{err}")
-    exit(0) 
+    exit(0)
