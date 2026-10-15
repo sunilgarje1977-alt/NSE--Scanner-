@@ -1,24 +1,23 @@
 name: NSE 500 Fast Scanner
 
 on:
-  schedule:
-    - cron: '*/2 3-10 * * 1-5'
   workflow_dispatch:
+  schedule:
+    - cron: '*/5 3-10 * * 1-5'
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-      - name: Install Dependencies
+          python-version: '3.11'
+      - name: Install deps
         run: |
           pip install --upgrade pip
-          pip install SmartApi-python pandas pyotp requests logzero websocket-client
-      - name: Run Fast Scanner
+          pip install -r requirements.txt
+      - name: Run Scanner
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
