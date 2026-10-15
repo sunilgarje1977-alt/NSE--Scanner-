@@ -39,7 +39,6 @@ def scan_stock(obj, symbol):
         ltp = float(ltp_resp['data']['ltp']) / 100
         
         # 2. Candle Data (5 Min) - VWAP + 9EMA Logic
-        # Angel Historical API
         hist_params = {
             "exchange": "NSE",
             "symboltoken": ltp_resp['data']['symboltoken'] if 'symboltoken' in ltp_resp['data'] else "",
@@ -68,9 +67,7 @@ def scan_stock(obj, symbol):
         p = df.iloc[-2]
         
         # ===== FINAL CONDITION =====
-        # BUY
         buy_cond = (c['close'] > c['vwap']) and (p['vwap'] <= p['9ema'] and c['vwap'] > c['9ema']) and (c['close'] > c['open']) and (c['volume'] > c['vol_avg']*1.2)
-        # SELL
         sell_cond = (c['close'] < c['vwap']) and (p['vwap'] >= p['9ema'] and c['vwap'] < c['9ema']) and (c['close'] < c['open']) and (c['volume'] > c['vol_avg']*1.2)
         
         if buy_cond:
@@ -79,26 +76,24 @@ def scan_stock(obj, symbol):
             return ("SELL", ltp, c)
         return None
     except Exception as e:
-        # print(f"{symbol} err {e}")
         return None
 
 def get_option_50_90(obj, symbol, ce_pe):
-    """NSE 150 मध्ये 50-90 वाला Option शोध"""
     try:
-        # Symbol चा ATM शोधून 50-90 वाला Option
-        # Simplified - Angel Option LTP
-        # तुला Expiry Logic Add करता येईल
         return f"{symbol} {ce_pe} @ 50-90 Range"
     except:
         return f"{symbol} {ce_pe} @ 50-90"
 
 def main():
     print(f"=== V7 START {datetime.now()} ===")
+    send_tg(f"✅ TEST OK - Scanner Started @ {datetime.now().strftime('%H:%M:%S')}") # <-- हा 1 नवीन Line
     try:
         obj = get_login()
         print("Login OK")
+        send_tg("✅ Angel Login OK - Market Check सुरु") # <-- आणि हा 1 नवीन Line
     except Exception as e:
         print(f"Login Fail {e} {traceback.format_exc()}")
+        send_tg(f"❌ Login Fail {e}")
         return
 
     # NIFTY Check
@@ -132,7 +127,7 @@ def main():
                 msg += f"\n➡️ *NIFTY PE BUY @ 50-90*"
             send_tg(msg)
         
-        time.sleep(0.2) # Rate Limit
+        time.sleep(0.2)
 
 if __name__ == "__main__":
-    main()
+    main() 
