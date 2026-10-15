@@ -1,16 +1,15 @@
 name: NSE 500 Fast Scanner
 on:
   workflow_dispatch:
-    inputs:
-      reason:
-        description: 'reason'
-        default: 'test'
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: pip install smartapi-python pyotp pandas requests
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: pip install smartapi-python logzero pyotp pandas requests
       - name: Run
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
@@ -19,4 +18,4 @@ jobs:
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python scanner.py
+        run: python scanner.py 
