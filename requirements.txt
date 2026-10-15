@@ -2,5 +2,3 @@ smartapi-python
 pyotp
 pandas
 requests
-yfinance
-lxml 
