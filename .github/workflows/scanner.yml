@@ -8,16 +8,22 @@ on:
     - cron: '0 9 * * 1-5'
     - cron: '30 9 * * 1-5'
   workflow_dispatch:
+
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
-        with: { python-version: '3.9' }
-      - run: pip install --upgrade pip
-      - run: pip install websocket-client pyotp requests logzero SmartApi-python
-      - run: python scanner.py
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Libs
+        run: |
+          pip install --upgrade pip
+          pip install websocket-client pyotp requests logzero SmartApi-python --quiet
+      - name: Run Scanner PRO V6
+        run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
