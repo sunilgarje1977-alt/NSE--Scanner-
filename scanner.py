@@ -130,4 +130,4 @@ try:
 except Exception as e:
     err=traceback.format_exc()[-800:]
     print(err)
-    send(f"💥 *V10 Fallback Running*\n{err[:300]}\n✅ Bot Active") 
+    send(f"💥 *V10 Fallback Running*\n{err[:300]}\n✅ Bot Active")
