@@ -21,7 +21,6 @@ try:
     spot=float(obj.ltpData("NSE","Nifty 50","26000")["data"]["ltp"])
     atm=round(spot/50)*50
 
-    # 5Min Candle
     try:
         h=obj.getCandleData({"exchange":"NSE","symboltoken":"26000","interval":"FIVE_MINUTE",
         "fromdate":(datetime.now()-timedelta(days=5)).strftime("%Y-%m-%d %H:%M"),
@@ -70,37 +69,38 @@ try:
         except: pass
         return None, None
 
-    msg=f"💥 *NIFTY PRO V17 LIVE @ {datetime.now():%H:%M} IST*\n"
-    msg+=f"Spot:{spot:.1f} ATM:{atm} | C:{close_c:.1f} L:{low_c:.1f} H:{high_c:.1f}\n"
+    msg=f"💥 *NIFTY PRO V18 LIVE @ {datetime.now():%H:%M} IST*\n"
+    msg+=f"Spot:{spot:.1f} ATM:{atm} | C:{close_c:.1f} L:{low_c:.1f}\n"
     msg+=f"9EMA:{ema9:.1f} x VWAP:{vwap:.1f} | RSI:{rsi:.1f} Vol:{vol_ratio:.2f}x {'🟢' if is_green else '🔴'}\n----------------------------\n"
 
-    # CALL MOMENTUM
+    done=False
     if ema9>vwap and rsi>=60 and is_green:
-        msg+=f"📈 *BULLISH CALL MOMENTUM*\n9EMA x VWAP UP + RSI>60 + Vol{vol_ratio:.1f}x + GREEN Closed\nLow SL:{low_c:.1f}\n\n"
+        done=True
+        msg+=f"📈 *BULLISH CALL - 9EMA Cross VWAP UP + Vol {vol_ratio:.1f}x + RSI 60 + GREEN*\nLow SL:{low_c:.1f}\n\n"
         for st in [atm, atm+50]:
             p,sym=get_live(st,"CE")
             entry=p if p else 132.4
-            tag=f"🟢 LIVE {sym}" if p else "⚠️ EST"
+            tag=f"🟢 LIVE {sym}" if p else "EST"
             msg+=f"✅ BUY {st} CE @ {entry} {tag}\nSL:{round(entry*0.7,1)} T1:{round(entry*1.5,1)} T2:{round(entry*2.5,1)} Trail:{round(entry*0.9,1)}\n\n"
 
-    # PUT MOMENTUM
     if ema9<vwap and rsi<=40 and is_red:
-        msg+=f"📉 *BEARISH PUT MOMENTUM*\n9EMA x VWAP DOWN + RSI<40 + Vol{vol_ratio:.1f}x + RED Closed\nHigh SL:{high_c:.1f}\n\n"
+        done=True
+        msg+=f"📉 *BEARISH PUT - 9EMA Cross VWAP DOWN + Vol {vol_ratio:.1f}x + RSI 40 + RED*\nHigh SL:{high_c:.1f}\n\n"
         for st in [atm, atm-50]:
             p,sym=get_live(st,"PE")
             entry=p if p else 95.2
-            tag=f"🟢 LIVE {sym}" if p else "⚠️ EST"
+            tag=f"🟢 LIVE {sym}" if p else "EST"
             msg+=f"✅ BUY {st} PE @ {entry} {tag}\nSL:{round(entry*0.7,1)} T1:{round(entry*1.5,1)} T2:{round(entry*2.5,1)}\n\n"
 
-    if "BUY" not in msg:
-        msg+=f"⏳ *WATCH* Vol:{vol_ratio:.1f}x RSI:{rsi:.1f}\nNear Cross - ATM {atm} Watch\n"
+    if not done:
+        msg+=f"⏳ WATCH - Near Momentum Vol:{vol_ratio:.1f}x RSI:{rsi:.1f}\n"
 
-    msg+=f"\n✅ V17 Done @ {datetime.now():%H:%M:%S} | 9EMAxVWAP | Vol1.2x | RSI60 | LowSL | T2.5x"
+    msg+=f"\n✅ V18 Done @ {datetime.now():%H:%M:%S} | 9EMAxVWAP 1.2xVol RSI60 LowSL T2.5x Trail"
     send(msg)
 
 except Exception as e:
     import traceback
     print(traceback.format_exc())
-    send(f"⚠️ V17 Error: {str(e)[:200]}")
+    send(f"⚠️ V18 Error handled: {str(e)[:200]}")
 
-sys.exit(0)  
+sys.exit(0) 
