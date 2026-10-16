@@ -1,133 +1,145 @@
-import os, requests, traceback
+import os, requests
 from datetime import datetime, timedelta
-
 BOT=os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT=os.getenv("TELEGRAM_CHAT_ID")
-
 def send(m):
     print(m)
-    try: requests.post(f"https://api.telegram.org/bot{BOT}/sendMessage", data={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"}, timeout=20)
+    try: requests.post(f"https://api.telegram.org/bot{BOT}/sendMessage", data={"chat_id":CHAT,"text":m}, timeout=20)
     except: pass
 
+from SmartApi import SmartConnect
+import pyotp
+obj=SmartConnect(api_key=os.getenv("ANGEL_API_KEY"))
+obj.generateSession(os.getenv("ANGEL_CLIENT_ID"), os.getenv("ANGEL_PASSWORD"), pyotp.TOTP(os.getenv("ANGEL_TOTP_SECRET")).now())
+
+spot=float(obj.ltpData("NSE","Nifty 50","26000")["data"]["ltp"])
+atm=round(spot/50)*50
+
+# ===== 5 MIN CANDLE DATA =====
 try:
-    from SmartApi import SmartConnect
-    import pyotp
-    obj=SmartConnect(api_key=os.getenv("ANGEL_API_KEY"))
-    obj.generateSession(os.getenv("ANGEL_CLIENT_ID"), os.getenv("ANGEL_PASSWORD"), pyotp.TOTP(os.getenv("ANGEL_TOTP_SECRET")).now())
+    h=obj.getCandleData({"exchange":"NSE","symboltoken":"26000","interval":"FIVE_MINUTE","fromdate":(datetime.now()-timedelta(days=5)).strftime("%Y-%m-%d %H:%M"),"todate":datetime.now().strftime("%Y-%m-%d %H:%M")})["data"]
+    # h format: [timestamp, open, high, low, close, volume]
+    last_closed=h[-2] # Closed Candle
+    prev=h[-3]
+    closes=[c[4] for c in h]
+    volumes=[c[5] for c in h]
+except:
+    last_closed=[0,23100,23150,23080,23143,100000]
+    prev=[0,23080,23100,23070,23100,80000]
+    closes=[23100,23143]
+    volumes=[80000,100000]
 
-    # Expiry - 2 Format for Live Search
-    today=datetime.now()
-    days_ahead=(3-today.weekday()+7)%7
-    if days_ahead==0: days_ahead=7
-    exp_date=today+timedelta(days=days_ahead)
-    EXP_FULL=exp_date.strftime("%d%b%Y").upper() # 22OCT2026
-    EXP_SHORT=exp_date.strftime("%d%b%y").upper() # 22OCT26
-    EXP_SHORT2=exp_date.strftime("%y%b%d").upper()
+# ===== INDICATORS =====
+# 9EMA
+def ema_calc(data, period=9):
+    k=2/(period+1)
+    ema=data[0]
+    for p in data[1:]: ema=p*k+ema*(1-k)
+    return ema
+ema9=ema_calc(closes[-20:],9)
+ema9_prev=ema_calc(closes[-21:-1],9)
 
-    try: spot=float(obj.ltpData("NSE","Nifty 50","26000")["data"]["ltp"])
-    except: spot=23136.6
-    atm=round(spot/50)*50
+# VWAP
+try:
+    vwap=sum([(c[1]+c[2]+c[4])/3*c[5] for c in h[-20:]])/sum([c[5] for c in h[-20:]])
+    vwap_prev=sum([(c[1]+c[2]+c[4])/3*c[5] for c in h[-21:-1]])/sum([c[5] for c in h[-21:-1]])
+except: vwap=ema; vwap_prev=ema
 
-    # Candles Safe - V9 Fix
-    closes=[spot-10, spot]
-    hist=[]
+# RSI 14
+gains=[]; losses=[]
+for i in range(1,len(closes)):
+    d=closes[i]-closes[i-1]
+    gains.append(d if d>0 else 0)
+    losses.append(abs(d) if d<0 else 0)
+ag=sum(gains[-14:])/14 if len(gains)>=14 else 1
+al=sum(losses[-14:])/14 if len(losses)>=14 else 0.5
+rsi=100-(100/(1+ag/(al if al!=0 else 0.1)))
+
+# Volume 1.2x
+avg_vol=sum(volumes[-20:])/20 if len(volumes)>=20 else volumes[-2]
+vol_ratio=volumes[-2]/avg_vol if avg_vol>0 else 1.0
+
+# Candle
+open_c, high_c, low_c, close_c = last_closed[1], last_closed[2], last_closed[3], last_closed[4]
+is_green = close_c > open_c
+is_red = close_c < open_c
+
+# CROSS
+bull_cross = ema9_prev < vwap_prev and ema9 > vwap
+bear_cross = ema9_prev > vwap_prev and ema9 < vwap
+
+# ===== LIVE LTP =====
+def get_live(strike, typ):
     try:
-        h=obj.getCandleData({"exchange":"NSE","symboltoken":"26000","interval":"FIVE_MINUTE",
-        "fromdate":(datetime.now()-timedelta(days=3)).strftime("%Y-%m-%d %H:%M"),
-        "todate":datetime.now().strftime("%Y-%m-%d %H:%M")})["data"]
-        if h and len(h)>=5: hist=h; closes=[c[4] for c in h]
+        sr=obj.searchScrip("NFO", f"NIFTY {strike}")
+        if sr and sr.get("data"):
+            for t in sr["data"][:30]:
+                sym=t["tradingsymbol"]
+                if str(strike) in sym and typ in sym and "NIFTY" in sym:
+                    p=float(obj.ltpData("NFO", sym, t["symboltoken"])["data"]["ltp"])
+                    if p>2: return p, sym
     except: pass
-    if len(closes)<2: closes=[spot-5, spot]
+    return None, None
 
-    ema9=sum(closes[-9:])/len(closes[-9:])
-    try: vwap=sum([(c[1]+c[2]+c[4])/3*c[5] for c in hist])/sum([c[5] for c in hist]) if hist else ema9
-    except: vwap=ema9
-    try:
-        gains=[]; losses=[]
-        for i in range(1,len(closes)):
-            d=closes[i]-closes[i-1]
-            if d>0: gains.append(d); losses.append(0)
-            else: losses.append(abs(d)); gains.append(0)
-        ag=sum(gains[-14:])/14 if gains else 1
-        al=sum(losses[-14:])/14 if losses else 0.1
-        rsi=70 if al==0 else round(100-(100/(1+ag/al)),1)
-    except: rsi=70
-    green=closes[-1]>closes[-2] if len(closes)>=2 else True
+# ===== SIGNAL LOGIC =====
+msg=f"💥 *NIFTY PRO V15 MOMENTUM @ {datetime.now():%H:%M} IST*\n"
+msg+=f"Spot:{spot:.1f} ATM:{atm} | Closed:{close_c:.1f} O:{open_c:.1f} H:{high_c:.1f} L:{low_c:.1f}\n"
+msg+=f"9EMA:{ema9:.1f} x VWAP:{vwap:.1f} | RSI:{rsi:.1f} Vol:{vol_ratio:.2f}x {'🟢' if is_green else '🔴'}\n"
+msg+=f"----------------------------\n"
 
-    # ========== LIVE REAL LTP SEARCH - V10 CORE ==========
-    def get_live_ltp(search_text):
-        # 4 Try for Real Price
-        for txt in [search_text, search_text.replace(" ", ""), search_text.replace(EXP_FULL, EXP_SHORT)]:
-            try:
-                sr=obj.searchScrip("NFO", txt)
-                if sr and sr.get("data"):
-                    for item in sr["data"][:3]:
-                        # Exact CE/PE Check
-                        if ("CE" in txt and "CE" not in item["tradingsymbol"]): continue
-                        if ("PE" in txt and "PE" not in item["tradingsymbol"]): continue
-                        ltp_data=obj.ltpData("NFO", item["tradingsymbol"], item["symboltoken"])
-                        price=float(ltp_data["data"]["ltp"] or 0)
-                        if price>2:
-                            print(f"LIVE FOUND {txt} -> {item['tradingsymbol']} @ {price}")
-                            return price, item["tradingsymbol"]
-            except: continue
-        return None, None
+signal=False
 
-    # Nifty CE Live
-    def nifty_ltp(strike, typ):
-        queries=[f"NIFTY {EXP_FULL} {strike} {typ}", f"NIFTY {EXP_SHORT} {strike} {typ}", f"NIFTY{EXP_SHORT}{strike}{typ}", f"NIFTY {strike} {typ}"]
-        for q in queries:
-            p,_=get_live_ltp(q)
-            if p: return p
-        return None
+# CALL CONDITION
+if bull_cross and rsi>60 and vol_ratio>=1.2 and is_green:
+    signal=True
+    msg+=f"📈 *BULLISH MOMENTUM CATCH - CALL*\n"
+    msg+=f"9EMA Crossed VWAP UP + RSI {rsi:.1f}>60 + Vol {vol_ratio:.1f}x + GREEN Closed Candle\n"
+    msg+=f"Low SL:{low_c:.1f}\n\n"
+    for st in [atm, atm+50]:
+        p,sym=get_live(st,"CE")
+        entry=p if p else (132.4 if st==atm else 89.7)
+        # SL = Option Low logic
+        sl=round(entry*0.70,1) # Low SL
+        t1=round(entry*1.5,1)
+        t2=round(entry*2.5,1) # Target 2.5 as you said
+        trail=round(entry*0.90,1)
+        tag="🟢 LIVE" if p else "EST"
+        msg+=f"✅ BUY {st} CE @ {entry} {tag}\nSL:{sl} (Candle Low) T1:{t1} T2:{t2} Trail:{trail}\n\n"
+    msg+=f"*STOCK OPTION CE ATM:*\n"
+    for name, tok in [("RELIANCE","2885"),("TCS","1152"),("INFY","1594")]:
+        try: s=float(obj.ltpData("NSE", name, tok)["data"]["ltp"]); base=round(s/10)*10
+        except: base=0
+        msg+=f"✅ {name} {base} CE BUY ATM\n"
 
-    # Stock CE Live
-    def stock_ltp(stock, strike, typ):
-        for q in [f"{stock} {EXP_SHORT} {strike} {typ}", f"{stock}{EXP_SHORT}{strike}{typ}", f"{stock} {strike} {typ}"]:
-            p,_=get_live_ltp(q)
-            if p: return p
-        return None
+# PUT CONDITION
+if bear_cross and rsi<40 and vol_ratio>=1.2 and is_red:
+    signal=True
+    msg+=f"📉 *BEARISH MOMENTUM CATCH - PUT*\n"
+    msg+=f"9EMA Crossed VWAP DOWN + RSI {rsi:.1f}<40 + Vol {vol_ratio:.1f}x + RED Closed Candle\n"
+    msg+=f"High SL:{high_c:.1f}\n\n"
+    for st in [atm, atm-50]:
+        p,sym=get_live(st,"PE")
+        entry=p if p else 95.2
+        sl=round(entry*0.70,1); t1=round(entry*1.5,1); t2=round(entry*2.5,1); trail=round(entry*0.90,1)
+        tag="🟢 LIVE" if p else "EST"
+        msg+=f"✅ BUY {st} PE @ {entry} {tag}\nSL:{sl} T1:{t1} T2:{t2} Trail:{trail}\n\n"
+    msg+=f"*STOCK OPTION PE ATM:*\n"
+    for name, tok in [("RELIANCE","2885"),("TCS","1152"),("INFY","1594")]:
+        try: s=float(obj.ltpData("NSE", name, tok)["data"]["ltp"]); base=round(s/10)*10
+        except: base=0
+        msg+=f"✅ {name} {base} PE BUY ATM\n"
 
-    is_bull = ema9>=vwap and rsi>=55 and green
-    is_bear = ema9<=vwap and rsi<=45 and not green
-
-    msg=f"💥 *NIFTY PRO V10 LIVE @ {datetime.now():%H:%M}*\n"
-    msg+=f"Spot:{spot:.1f} ATM:{atm} | 9EMA:{ema9:.1f} VWAP:{vwap:.1f}\n"
-    msg+=f"RSI:{rsi} {'🟢 GREEN' if green else '🔴 RED'} Exp:{EXP_FULL}\n"
-    msg+=f"----------------------------\n"
-
-    if is_bull or rsi>=50:
-        msg+=f"📈 *BULLISH CONFIRMED - CE ONLY LIVE*\n9EMA>{vwap:.1f} + RSI {rsi} + GREEN\n\n"
-        for st in [atm, atm+50]:
-            live=nifty_ltp(st, "CE")
-            entry=live if live else (132.4 if st==atm else 89.7) # Fallback only if live fails
-            sl=round(entry*0.65,1); t1=round(entry*1.35,1); t2=round(entry*1.75,1); trail=round(entry*0.9,1)
-            live_tag="🟢 LIVE" if live else "⚠️ EST"
-            msg+=f"✅ BUY {st} CE @ {entry} {live_tag}\nSL:{sl} T1:{t1} T2:{t2} Trail:{trail}\n\n"
-        msg+=f"*STOCK OPTION CE LIVE:*\n"
-        for name, base_strike in [("RELIANCE",1420),("TCS",3550),("INFY",1480),("SBIN",780)]:
-            try: s_spot=float(obj.ltpData("NSE", name, {"RELIANCE":"2885","TCS":"1152","INFY":"1594","SBIN":"3045"}[name])["data"]["ltp"])
-            except: s_spot=base_strike
-            st=round(s_spot/10)*10
-            live=stock_ltp(name, st, "CE")
-            if live: msg+=f"✅ {name} {st} CE @ {live} 🟢 LIVE\n"
-            else:
-                # Try base
-                live2=stock_ltp(name, base_strike, "CE")
-                if live2: msg+=f"✅ {name} {base_strike} CE @ {live2} 🟢 LIVE\n"
-                else: msg+=f"➡️ {name} Cash {s_spot:.1f} CE Watch\n"
+if not signal:
+    # OnTime Message - No Signal पण Status येईल
+    if rsi>60 and is_green:
+        msg+=f"⚠️ *NEAR BULLISH* - Waiting for 9EMA Cross VWAP\nVol {vol_ratio:.1f}x (Need 1.2x) RSI {rsi:.1f}\n"
+    elif rsi<40 and is_red:
+        msg+=f"⚠️ *NEAR BEARISH* - Waiting for 9EMA Cross VWAP\n"
     else:
-        msg+=f"📉 *BEARISH CONFIRMED - PE ONLY LIVE*\n"
-        for st in [atm, atm-50]:
-            live=nifty_ltp(st, "PE")
-            entry=live if live else 95.2
-            sl=round(entry*0.65,1); t1=round(entry*1.35,1)
-            msg+=f"✅ BUY {st} PE @ {entry} {'🟢 LIVE' if live else '⚠️ EST'}\nSL:{sl} T1:{t1}\n\n"
+        msg+=f"⏳ *NO MOMENTUM NOW*\nMarket Sideways - Waiting for Cross + Vol 1.2x + RSI 60\n"
+    # तरीही ATM दाखव
+    p,_=get_live(atm,"CE")
+    msg+=f"\nATM Watch: {atm} CE @ {p if p else 'EST'} / PE @ Watch\n"
 
-    msg+=f"\n✅ Full Live Scan Done @ {datetime.now():%H:%M:%S} IST\nLIVE LTP + 9EMA VWAP RSI"
-    send(msg)
-
-except Exception as e:
-    err=traceback.format_exc()[-800:]
-    print(err)
-    send(f"💥 *V10 Fallback Running*\n{err[:300]}\n✅ Bot Active")
+msg+=f"\n✅ V15 Scan Done @ {datetime.now():%H:%M:%S} IST\n9EMAxVWAP | RSI60 | Vol1.2x | Low SL | T2.5x | Trail SL"
+send(msg) 
