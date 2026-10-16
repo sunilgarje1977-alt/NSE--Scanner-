@@ -1,37 +1,24 @@
-name: NSE Real PA Scanner
+name: NSE Real Time Scanner
 on:
   schedule:
-    # Real Price Action - Market Hours Only (IST)
-    - cron: '15 3 * * 1-5' # 08:45 IST Pre-check
-    - cron: '30 3 * * 1-5' # 09:00 IST
-    - cron: '0 4 * * 1-5' # 09:30 IST
-    - cron: '30 4 * * 1-5' # 10:00 IST
-    - cron: '0 5 * * 1-5' # 10:30 IST
-    - cron: '30 5 * * 1-5' # 11:00 IST
-    - cron: '0 6 * * 1-5' # 11:30 IST
-    - cron: '30 6 * * 1-5' # 12:00 IST
-    - cron: '0 7 * * 1-5' # 12:30 IST
-    - cron: '30 7 * * 1-5' # 13:00 IST
-    - cron: '0 8 * * 1-5' # 13:30 IST
-    - cron: '30 8 * * 1-5' # 14:00 IST
-    - cron: '0 9 * * 1-5' # 14:30 IST
-    - cron: '15 9 * * 1-5' # 15:00 IST
+    - cron: '15 3 * * 1-5'  # 9:15 IST
+    - cron: '30 3 * * 1-5'  # 9:30 IST
+    - cron: '0 4 * * 1-5'   # 9:30
+    - cron: '30 4 * * 1-5'  # 10:00
+    - cron: '0 5 * * 1-5'   # 10:30
+    - cron: '30 5 * * 1-5'  # 11:00
+    - cron: '0 9 * * 1-5'   # 2:30
+    - cron: '30 9 * * 1-5'  # 3:00
   workflow_dispatch:
-
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-      - name: Install Deps
-        run: pip install SmartApi-python logzero websocket-client pandas pyotp requests
-      - name: Run Real PA Scanner
-        run: python scanner.py
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with: { python-version: '3.9' }
+      - run: pip install SmartApi-python pyotp requests
+      - run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
