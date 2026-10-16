@@ -12,8 +12,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install --upgrade pip pyotp requests SmartApi-python --quiet
-      - name: Run Scanner V16
-        run: python scanner.py
+      - run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
