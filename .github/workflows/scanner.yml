@@ -1,8 +1,8 @@
-name: NSE Real Time Scanner
+name: NSE 1MIN Real Time
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/15 3-10 * * 1-5'
+    - cron: '*/5 3-10 * * 1-5'  # दर 5 Min ला Trigger होईल, आतमध्ये 1 Min Loop चालेल
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -13,7 +13,8 @@ jobs:
           python-version: '3.11'
       - name: Install
         run: pip install -r requirements.txt --quiet
-      - run: python scanner.py
+      - name: Run 1Min Live Scanner
+        run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
