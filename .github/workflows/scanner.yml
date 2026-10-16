@@ -1,24 +1,21 @@
 name: NSE Real Time Scanner
 on:
   schedule:
-    - cron: '15 3 * * 1-5'  # 9:15 IST
-    - cron: '30 3 * * 1-5'  # 9:30 IST
-    - cron: '0 4 * * 1-5'   # 9:30
-    - cron: '30 4 * * 1-5'  # 10:00
-    - cron: '0 5 * * 1-5'   # 10:30
-    - cron: '30 5 * * 1-5'  # 11:00
-    - cron: '0 9 * * 1-5'   # 2:30
-    - cron: '30 9 * * 1-5'  # 3:00
+    - cron: '15 3 * * 1-5'
   workflow_dispatch:
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
         with: { python-version: '3.9' }
-      - run: pip install SmartApi-python pyotp requests
-      - run: python scanner.py
+      - name: Install Libs
+        run: |
+          pip install --upgrade pip
+          pip install SmartApi-python pyotp requests logzero
+      - name: Run Scanner
+        run: python scanner.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
