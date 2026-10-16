@@ -1,4 +1,5 @@
-smartapi-python
+SmartApi-python
 pyotp
-pandas
 requests
+websocket-client
+logzero
