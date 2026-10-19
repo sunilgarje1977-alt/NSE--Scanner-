@@ -1,24 +1,20 @@
 name: NSE 1MIN Real Time
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '*/5 3-10 * * 1-5'  # दर 5 Min ला Trigger होईल, आतमध्ये 1 Min Loop चालेल
+    - cron: '*/2 3-10 * * 1-5'
+  workflow_dispatch:
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install
-        run: pip install -r requirements.txt --quiet
-      - name: Run 1Min Live Scanner
-        run: python scanner.py
+      - run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      - run: python main.py
         env:
-          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
-          ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
-          ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
-          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }} 
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }} 
