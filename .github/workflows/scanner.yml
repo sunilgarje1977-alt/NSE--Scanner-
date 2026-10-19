@@ -1,7 +1,5 @@
 name: NSE 1MIN Real Time
 on:
-  schedule:
-    - cron: '*/2 3-10 * * 1-5'
   workflow_dispatch:
 jobs:
   scan:
@@ -11,10 +9,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install Libs
-        run: pip install --upgrade pip && pip install requests pytz pandas cloudscraper
-      - name: Run V25
-        run: python main.py
+      - run: pip install requests
+      - run: python main.py
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }} 
