@@ -1,125 +1,144 @@
-import os, sys, requests, time
-from datetime import datetime, timedelta
+import requests
+import pytz
+from datetime import datetime
+import time
+import json
 
-BOT = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT = os.getenv("TELEGRAM_CHAT_ID")
+# ===== CONFIG =====
+BOT_TOKEN = "YOUR_BOT_TOKEN"
+CHAT_ID = "YOUR_CHAT_ID"
+IST = pytz.timezone('Asia/Kolkata')
 
-def send(m):
-    print(m)
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.nseindia.com/"
+}
+
+def send_telegram(msg):
     try:
-        requests.post(f"https://api.telegram.org/bot{BOT}/sendMessage",
-        data={"chat_id": CHAT, "text": m, "parse_mode": "Markdown"}, timeout=20)
-    except:
-        pass
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+    except Exception as e:
+        print(f"TG Error {e}")
 
-def get_scanner_data(obj):
-    # Spot
-    spot = float(obj.ltpData("NSE", "Nifty 50", "26000")["data"]["ltp"])
-    atm = round(spot / 50) * 50
-    # Candle 1Min + 5Min
-    hist = obj.getCandleData({
-        "exchange": "NSE",
-        "symboltoken": "26000",
-        "interval": "ONE_MINUTE",
-        "fromdate": (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d %H:%M"),
-        "todate": datetime.now().strftime("%Y-%m-%d %H:%M")
-    })["data"]
-    h = hist
-    last = h[-2]
-    closes = [c[4] for c in h]
-    vols = [c[5] for c in h]
+# ===== IST TIME CHECK =====
+utc_now = datetime.utcnow().replace(tzinfo=pytz.utc)
+ist_now = utc_now.astimezone(IST)
+hour = ist_now.hour
+minute = ist_now.minute
 
-    def ema(data, p=9):
-        k = 2/(p+1); e = data[0]
-        for x in data[1:]: e = x*k + e*(1-k)
-        return e
+print(f"V22 NSE Check @ {ist_now.strftime('%H:%M:%S')} IST")
 
-    ema9 = ema(closes[-20:], 9)
-    vwap = sum([(c[1]+c[2]+c[4])/3 * c[5] for c in h[-20:]]) / sum([c[5] for c in h[-20:]])
+if hour < 9 or (hour == 9 and minute < 15) or hour > 15 or (hour == 15 and minute > 30):
+    msg = f"⌛ Market Closed @ {ist_now.strftime('%H:%M')} IST - V22 NSE Scanner Standby"
+    print(msg)
+    send_telegram(msg)
+    exit()
 
-    gains=[]; losses=[]
-    for i in range(1,len(closes)):
-        d=closes[i]-closes[i-1]
-        gains.append(d if d>0 else 0)
-        losses.append(abs(d) if d<0 else 0)
-    ag=sum(gains[-14:])/14 if len(gains)>=14 else 1
-    al=sum(losses[-14:])/14 if len(losses)>=14 else 0.5
-    rsi=100-(100/(1+ag/(al if al!=0 else 0.1)))
-
-    open_c, high_c, low_c, close_c = last[1], last[2], last[3], last[4]
-    is_green = close_c > open_c
-
-    # LIVE Option Price
-    def get_live(strike, typ):
-        try:
-            s = obj.searchScrip("NFO", f"NIFTY {strike}")
-            if s and s.get("data"):
-                for t in s["data"][:40]:
-                    sym=t["tradingsymbol"]
-                    if str(strike) in sym and typ in sym and "NIFTY" in sym:
-                        try:
-                            ltp=float(obj.ltpData("NFO", sym, t["symboltoken"])["data"]["ltp"])
-                            if ltp>2: return ltp, sym
-                        except: continue
-        except: pass
-        return None, None
-
-    return spot, atm, ema9, vwap, rsi, last, is_green, get_live
+# ===== DIRECT NSE DATA =====
+session = requests.Session()
+session.headers.update(HEADERS)
 
 try:
-    from SmartApi import SmartConnect
-    import pyotp
-    obj = SmartConnect(api_key=os.getenv("ANGEL_API_KEY"))
-    obj.generateSession(os.getenv("ANGEL_CLIENT_ID"), os.getenv("ANGEL_PASSWORD"), pyotp.TOTP(os.getenv("ANGEL_TOTP_SECRET")).now())
-
-    # 1 MIN LOOP - 14 Times = 14 Min Real-Time Data
-    for i in range(14):
-        try:
-            now = datetime.now()
-            # Market Time Check 9:15 to 3:35
-            if now.hour < 9 or (now.hour==9 and now.minute<15) or now.hour>15 or (now.hour==15 and now.minute>35):
-                send(f"⏳ Market Closed @ {now:%H:%M} - V20 1Min Scanner Standby")
-                break
-
-            spot, atm, ema9, vwap, rsi, last, is_green, get_live_fn = get_scanner_data(obj)
-            low_c = last[3]; high_c = last[2]; close_c = last[4]
-
-            msg = f"⚡ *NIFTY 1MIN LIVE #{i+1} @ {now:%H:%M:%S} IST*\n"
-            msg += f"Spot:{spot:.1f} ATM:{atm} | C:{close_c:.1f}\n"
-            msg += f"9EMA:{ema9:.1f} x VWAP:{vwap:.1f} | RSI:{rsi:.0f} {'🟢' if is_green else '🔴'}\n"
-            msg += "----------------------------\n"
-
-            if ema9 > vwap and rsi >= 58 and is_green:
-                msg += f"📈 *BULLISH CALL*\n"
-                for st in [atm, atm+50]:
-                    p,sym = get_live_fn(st,"CE")
-                    entry = p if p else 0
-                    if entry:
-                        msg += f"✅ BUY {st} CE @ {entry} 🟢 LIVE {sym}\nSL:{round(entry*0.7,1)} T1:{round(entry*1.5,1)} T2:{round(entry*2.5,1)}\n\n"
-                    else:
-                        msg += f"✅ BUY {st} CE @ Market (LTP Fetching...)\n\n"
-            elif ema9 < vwap and rsi <= 42 and not is_green:
-                msg += f"📉 *BEARISH PUT*\n"
-                for st in [atm, atm-50]:
-                    p,sym = get_live_fn(st,"PE")
-                    entry = p if p else 0
-                    if entry:
-                        msg += f"✅ BUY {st} PE @ {entry} 🟢 LIVE {sym}\nSL:{round(entry*0.7,1)} T1:{round(entry*1.5,1)}\n\n"
-            else:
-                msg += f"⏳ WATCH - Near 9EMA Cross\n"
-
-            msg += f"V20 1MIN Done #{i+1}/14"
-            send(msg)
-
-        except Exception as inner_e:
-            send(f"⚠️ Loop {i+1} Error: {str(inner_e)[:100]}")
-
-        # 1 MIN WAIT - Real Time
-        if i < 13:
-            time.sleep(60)
-
+    # 1. First hit main page to get cookies
+    session.get("https://www.nseindia.com", timeout=10)
+    time.sleep(1)
+    
+    # 2. Get NIFTY Spot + Option Chain
+    url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
+    res = session.get(url, timeout=15)
+    data = res.json()
+    
+    spot = data['records']['underlyingValue']
+    atm = round(spot / 50) * 50
+    expiry = data['records']['expiryDates'][0]  # Nearest Expiry
+    
+    # Find ATM Option Data
+    atm_data = None
+    for item in data['records']['data']:
+        if item['strikePrice'] == atm and item['expiryDate'] == expiry:
+            atm_data = item
+            break
+    
+    if not atm_data:
+        raise Exception("ATM Data Not Found")
+    
+    ce_data = atm_data.get('CE', {})
+    pe_data = atm_data.get('PE', {})
+    
+    ce_ltp = ce_data.get('lastPrice', 0)
+    pe_ltp = pe_data.get('lastPrice', 0)
+    ce_oi = ce_data.get('openInterest', 0)
+    pe_oi = pe_data.get('openInterest', 0)
+    
+    # PCR for Direction
+    pcr = pe_oi / ce_oi if ce_oi > 0 else 1
+    change = data['records']['data'][0].get('CE',{}).get('underlyingValue', spot) - spot
+    
+    # Simple EMA/VWAP Logic using NSE Intraday (approx)
+    # NSE gives us true LTP - we use PCR + LTP Change for Signal
+    
+    bullish = pcr > 1.1 and ce_ltp > 0  # More PUT OI = Bullish
+    bearish = pcr < 0.9 and pe_ltp > 0  # More CALL OI = Bearish
+    
+    # For better: use NSE Chart API for 9EMA
+    chart_url = f"https://www.nseindia.com/api/chart-databyindex?index=NIFTY%2050&indices=true"
+    chart_res = session.get(chart_url, timeout=10).json()
+    
+    # Last 10 candles for 9EMA approx
+    candles = chart_res['grapthData'][-15:]  # NSE gives [timestamp, value]
+    closes = [c[1] for c in candles]
+    ema9 = sum(closes[-9:]) / 9
+    vwap = sum(closes) / len(closes)
+    spot_live = closes[-1]
+    
+    # Vol & RSI Approx from NSE
+    rsi = 60 if spot_live > ema9 else 40
+    
 except Exception as e:
-    import traceback; traceback.print_exc()
-    send(f"❌ V20 Error @ {datetime.now():%H:%M} : {str(e)[:150]}")
+    send_telegram(f"⚠️ V22 NSE Error: {e}")
+    print(f"NSE Error {e}")
+    exit()
 
-sys.exit(0) 
+# ===== V22 SIGNAL - NSE LIVE PREMIUM =====
+print(f"NSE Spot:{spot} ATM:{atm} CE:{ce_ltp} PE:{pe_ltp} PCR:{round(pcr,2)} EMA9:{round(ema9)} VWAP:{round(vwap)}")
+
+if ema9 > vwap and rsi >= 58:  # BULLISH
+    sl = round(ce_ltp * 0.7, 1)
+    t1 = round(ce_ltp * 1.5, 1)
+    t2 = round(ce_ltp * 2.5, 1)
+    trail = round(ce_ltp * 0.9, 1)
+    msg = f"""🚀 NIFTY PRO V22 NSE LIVE @ {ist_now.strftime('%H:%M')} IST
+Spot:{spot} ATM:{atm} | CE LTP:{ce_ltp} PE LTP:{pe_ltp}
+9EMA:{round(ema9)} x VWAP:{round(vwap)} | PCR:{round(pcr,2)} | RSI:{rsi}
+
+📈 BULLISH CALL - NSE DATA
+✅ BUY {atm} CE @ {ce_ltp} 🟢 LIVE {expiry}
+SL:{sl} T1:{t1} T2:{t2} Trail:{trail}
+OI CE:{ce_oi} PE:{pe_oi}"""
+    send_telegram(msg)
+
+elif ema9 < vwap and rsi <= 42:  # BEARISH
+    sl = round(pe_ltp * 0.7, 1)
+    t1 = round(pe_ltp * 1.5, 1)
+    t2 = round(pe_ltp * 2.5, 1)
+    trail = round(pe_ltp * 0.9, 1)
+    msg = f"""💥 NIFTY PRO V22 NSE LIVE @ {ist_now.strftime('%H:%M')} IST
+Spot:{spot} ATM:{atm} | CE LTP:{ce_ltp} PE LTP:{pe_ltp}
+9EMA:{round(ema9)} x VWAP:{round(vwap)} | PCR:{round(pcr,2)} | RSI:{rsi}
+
+📉 BEARISH PUT - NSE DATA
+✅ BUY {atm} PE @ {pe_ltp} 🔴 LIVE {expiry}
+SL:{sl} T1:{t1} T2:{t2} Trail:{trail}
+OI CE:{ce_oi} PE:{pe_oi}"""
+    send_telegram(msg)
+
+else:
+    msg = f"Scanner OK {ist_now.strftime('%d-%b %H:%M')} NSE LIVE Active No Signal\nSpot:{spot} ATM:{atm} CE:{ce_ltp} PE:{pe_ltp} PCR:{round(pcr,2)} 9EMA:{round(ema9)} VWAP:{round(vwap)} - WATCH Near Cross"
+    print(msg)
+    if minute % 10 == 0:  # 10 Min la ekda
+        send_telegram(msg)
+
+print("✅ V22 NSE Done") 
