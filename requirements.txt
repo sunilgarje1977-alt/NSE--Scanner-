@@ -1,5 +1,4 @@
-SmartApi-python
-pyotp
 requests
-websocket-client
-logzero
+pytz
+pandas
+cloudscraper 
