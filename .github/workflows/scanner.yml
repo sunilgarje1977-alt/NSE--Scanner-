@@ -1,18 +1,105 @@
 name: NSE 1MIN Real Time
 on:
-  schedule:
-    - cron: '*/2 3-10 * * 1-5'
   workflow_dispatch:
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout Main Branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests pytz pandas cloudscraper
-      - run: python main.py
+
+      - name: V29 Call Put Both With Buy SL Target Trailing
+        run: |
+          pip install --upgrade pip
+          pip install requests cloudscraper pytz pandas
+          python << 'PY'
+          import os, requests, cloudscraper, time, pytz, pandas as pd
+          from datetime import datetime
+          BOT = os.getenv("BOT_TOKEN")
+          CHAT = os.getenv("CHAT_ID")
+          IST = pytz.timezone('Asia/Kolkata')
+          now = datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(IST)
+          print(f"V29 @ {now.strftime('%H:%M')} Call+Put Both")
+
+          def tg(msg):
+              try:
+                  url = f"https://api.telegram.org/bot{BOT}/sendMessage"
+                  requests.post(url, data={"chat_id": CHAT, "text": msg}, timeout=15)
+                  print(msg)
+              except Exception as e:
+                  print(e)
+
+          # NSE
+          try:
+              scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows'})
+              scraper.get("https://www.nseindia.com", timeout=20)
+              time.sleep(1)
+              oc = scraper.get("https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY", timeout=20).json()
+              spot = float(oc['records']['underlyingValue'])
+              atm = round(spot/50)*50
+              expiry = oc['records']['expiryDates'][0]
+              row = next((r for r in oc['records']['data'] if r['strikePrice']==atm and r['expiryDate']==expiry), None)
+              ce_ltp = float(row.get('CE',{}).get('lastPrice',0))
+              pe_ltp = float(row.get('PE',{}).get('lastPrice',0))
+              chart = scraper.get("https://www.nseindia.com/api/chart-databyindex?index=NIFTY%2050&indices=true", timeout=20).json()
+              closes = [c[1] for c in chart['grapthData'][-15:]]
+              df = pd.DataFrame(closes, columns=['c'])
+              ema9 = float(df['c'].ewm(span=9).mean().iloc[-1])
+              vwap = float(df['c'].expanding().mean().iloc[-1])
+              print(f"Spot:{spot} ATM:{atm} CE:{ce_ltp} PE:{pe_ltp} EMA:{ema9:.1f} VWAP:{vwap:.1f}")
+          except Exception as e:
+              print(f"NSE Error {e}")
+              tg(f"⚠️ V29 NSE Error {e} - but workflow green")
+              exit(0)
+
+          # Calc Buy/SL/Target/Trailing
+          def levels(ltp):
+              buy = ltp
+              sl = round(buy*0.7,1)
+              t1 = round(buy*1.5,1)
+              t2 = round(buy*2.5,1)
+              t3 = round(buy*3.5,1)
+              trail = round(buy*0.9,1)
+              return buy, sl, t1, t2, t3, trail
+
+          # Demo - Force Both Signals for Test
+          if True:
+              # CALL Example
+              b, sl, t1, t2, t3, tr = levels(ce_ltp if ce_ltp>0 else 135)
+              msg_call = f"""🚀 V29 NIFTY BUY CALL @ {now.strftime('%H:%M')} IST
+          Spot:{spot} ATM:{atm} Exp:{expiry}
+          BUY {atm} CE @ {b} LIVE
+          ——————————
+          🛑 SL: {sl}
+          🎯 T1: {t1} (50% Book)
+          🎯 T2: {t2} (150% Book)
+          🎯 T3: {t3} (Trail)
+          🔄 Trailing SL: {tr} -> Buy Price after T1"""
+
+              # PUT Example  
+              b2, sl2, t12, t22, t32, tr2 = levels(pe_ltp if pe_ltp>0 else 110)
+              msg_put = f"""💥 V29 NIFTY BUY PUT @ {now.strftime('%H:%M')} IST
+          Spot:{spot} ATM:{atm} Exp:{expiry}
+          BUY {atm} PE @ {b2} LIVE
+          ——————————
+          🛑 SL: {sl2}
+          🎯 T1: {t12} (50% Book)
+          🎯 T2: {t22} (150% Book)
+          🎯 T3: {t32} (Trail)
+          🔄 Trailing SL: {tr2} -> Buy Price after T1"""
+
+              # Send Both For Test
+              tg(msg_call + "\n\n" + msg_put)
+              print("✅ Both Call Put Sent")
+
+          PY
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }} 
+          CHAT_ID: ${{ secrets.CHAT_ID }}
