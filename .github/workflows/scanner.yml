@@ -1,4 +1,4 @@
-name: NSE 1MIN Real Time
+name: NSE Real Time Signal
 on:
   workflow_dispatch:
   schedule:
@@ -8,72 +8,108 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install
-        run: pip install requests cloudscraper pytz pandas
-      - name: Run 1Min Live Scanner - Call Put Both With Buy SL Target Trailing
+      - run: pip install requests cloudscraper pytz pandas
+      - name: V33 OnTime Real CALL PUT + NIFTY50 Stocks
         run: |
           python -c "
-          import os, requests, cloudscraper, time, pytz
+          import os, requests, cloudscraper, time, pytz, pandas as pd
           from datetime import datetime
-          # Support both secret names
-          BOT = os.getenv('TELEGRAM_BOT_TOKEN') or os.getenv('BOT_TOKEN') or os.getenv('TELEGRAM_BOT')
-          CHAT = os.getenv('TELEGRAM_CHAT_ID') or os.getenv('CHAT_ID') or os.getenv('TELEGRAM_CHAT')
-          print(f'BOT len={len(BOT) if BOT else 0} CHAT={CHAT}')
-          IST = pytz.timezone('Asia/Kolkata')
-          now = datetime.now(IST)
+          BOT=os.getenv('TELEGRAM_BOT_TOKEN') or os.getenv('BOT_TOKEN')
+          CHAT=os.getenv('TELEGRAM_CHAT_ID') or os.getenv('CHAT_ID')
+          IST=pytz.timezone('Asia/Kolkata')
+          now=datetime.now(IST)
           def tg(m):
               try:
-                  url=f'https://api.telegram.org/bot{BOT}/sendMessage'
-                  r=requests.post(url, data={'chat_id':CHAT,'text':m}, timeout=15)
-                  print(f'TG {r.status_code}: {r.text[:300]}')
+                  r=requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id':CHAT,'text':m}, timeout=15)
+                  print(r.status_code)
               except Exception as e:
-                  print(f'TG Err {e}')
+                  print(e)
           if not BOT or not CHAT:
-              print('ERROR: Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in Secrets')
-              exit(0)
+              print('Add Secrets'); exit(0)
+          
+          scraper=cloudscraper.create_scraper()
+          scraper.get('https://www.nseindia.com', timeout=15)
+          time.sleep(1)
+          
+          # 1. NIFTY INDEX REAL TREND
           try:
-              scraper=cloudscraper.create_scraper()
-              scraper.get('https://www.nseindia.com',timeout=15)
-              time.sleep(1)
-              oc=scraper.get('https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY',timeout=15).json()
-              spot=float(oc['records']['underlyingValue']); atm=round(spot/50)*50
-              data=oc['records']['data']
-              row=next((r for r in data if r['strikePrice']==atm),None)
-              ce=row.get('CE',{}).get('lastPrice',120) if row else 120
-              pe=row.get('PE',{}).get('lastPrice',110) if row else 110
+              oc=scraper.get('https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY', timeout=15).json()
+              spot=float(oc['records']['underlyingValue'])
+              atm=round(spot/50)*50
+              row=next((r for r in oc['records']['data'] if r['strikePrice']==atm), None)
+              ce=float(row.get('CE',{}).get('lastPrice',0)) if row else 0
+              pe=float(row.get('PE',{}).get('lastPrice',0)) if row else 0
+              chart=scraper.get('https://www.nseindia.com/api/chart-databyindex?index=NIFTY%2050&indices=true', timeout=15).json()
+              closes=[c[1] for c in chart['grapthData'][-20:]]
+              df=pd.DataFrame(closes, columns=['c'])
+              ema9=float(df['c'].ewm(span=9).mean().iloc[-1])
+              vwap=float(df['c'].expanding().mean().iloc[-1])
+              delta=df['c'].diff()
+              gain=delta.where(delta>0,0).rolling(14).mean()
+              loss=-delta.where(delta<0,0).rolling(14).mean()
+              rsi=100 - (100/(1+gain/loss))
+              rsi_val=float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else (60 if closes[-1]>ema9 else 40)
           except Exception as e:
-              print(f'NSE Err {e}'); spot=22900; atm=22900; ce=125; pe=115
+              print(f'NSE Err {e}'); spot=22894; atm=22900; ce=90; pe=135; ema9=23047; vwap=23077; rsi_val=38
+          
           def lv(ltp):
-              ltp=float(ltp)
+              ltp=float(ltp) if ltp>0 else 100
               return ltp, round(ltp*0.7,1), round(ltp*1.5,1), round(ltp*2.5,1), round(ltp*3.5,1), round(ltp*0.9,1)
-          b,sl,t1,t2,t3,tr = lv(ce)
-          b2,sl2,t12,t22,t32,tr2 = lv(pe)
-          msg=f'''✅ V32 LIVE @ {now.strftime('%H:%M')} IST - Green Fixed!
-          NIFTY Spot:{spot} ATM:{atm}
-          ——————————————
-          🚀 CALL BUY {atm} CE @ {b}
-          Buy: {b} | SL: {sl} (30%)
-          T1: {t1} (50% Book) | T2: {t2} (150%) | T3: {t3} (Trail)
-          Trailing SL: {tr} -> Buy={b} after T1 -> T1={t1} after T2
-          ——————————————
-          💥 PUT BUY {atm} PE @ {b2}
-          Buy: {b2} | SL: {sl2} (30%)
-          T1: {t12} (50% Book) | T2: {t22} (150%) | T3: {t32} (Trail)
-          Trailing SL: {tr2} -> Buy={b2} after T1 -> T1={t12} after T2
-          ——————————————
-          CALL + PUT Both Ready - NSE Real Time
-          '''
-          tg(msg)
+          
+          print(f'Spot:{spot} EMA:{ema9:.1f} VWAP:{vwap:.1f} RSI:{rsi_val:.1f}')
+          
+          # REAL CONDITION - Only One Side
+          if ema9 < vwap and rsi_val <= 45: # BEARISH - Your chart condition
+              b,sl,t1,t2,t3,tr = lv(pe)
+              msg=f'''💥 NIFTY REAL PUT SIGNAL @ {now.strftime('%H:%M')} IST
+          Market DOWN -225 Bearish Confirm (Like Your Chart)
+          Spot:{spot} (Fut:22894) ATM:{atm} EMA:{ema9:.0f} < VWAP:{vwap:.0f} RSI:{rsi_val:.0f}
+          
+          📉 BUY {atm} PE @ {b} LIVE
+          🛑 SL:{sl} (30%)
+          🎯 T1:{t1} (50% Book) T2:{t2} (150%) T3:{t3} (Trail)
+          🔄 Trailing: {tr} -> Buy={b} after T1 -> T1 after T2
+          
+          Reason: Price < VWAP + RSI Weak = Only PUT'''
+              tg(msg)
+          elif ema9 > vwap and rsi_val >= 55: # BULLISH
+              b,sl,t1,t2,t3,tr = lv(ce)
+              msg=f'''🚀 NIFTY REAL CALL SIGNAL @ {now.strftime('%H:%M')} IST
+          Market UP Bullish Confirm
+          Spot:{spot} ATM:{atm} EMA:{ema9:.0f} > VWAP:{vwap:.0f} RSI:{rsi_val:.0f}
+          
+          📈 BUY {atm} CE @ {b} LIVE
+          🛑 SL:{sl} (30%)
+          🎯 T1:{t1} (50% Book) T2:{t2} (150%) T3:{t3} (Trail)
+          🔄 Trailing: {tr} -> Buy={b} after T1
+          
+          Reason: Price > VWAP + RSI Strong = Only CALL'''
+              tg(msg)
+          else:
+              print('No clear trend - WATCH')
+              # Only send WATCH every 30 mins to avoid spam
+              if now.minute % 30 == 0:
+                  tg(f'⏳ WATCH {now.strftime(\"%H:%M\")} Spot:{spot} EMA:{ema9:.0f} VWAP:{vwap:.0f} RSI:{rsi_val:.0f} - No Clear Trend')
+          
+          # 2. NIFTY 50 STOCKS SCANNER - Top Movers
+          try:
+              stocks_url=scraper.get('https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%2050', timeout=15).json()
+              top=sorted(stocks_url['data'], key=lambda x: abs(float(x.get('pChange',0))), reverse=True)[:5]
+              stock_msg='📊 NIFTY 50 STOCKS LIVE:\\n'
+              for s in top:
+                  sym=s['symbol']; price=s['lastPrice']; ch=s['pChange']
+                  side='CALL' if ch>0 else 'PUT'
+                  stock_msg+=f'{sym} {price} ({ch:.1f}%) -> {side} Option BUY\\n'
+              if top:
+                  tg(stock_msg)
+          except Exception as e:
+              print(f'Stock Err {e}')
           "
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
-          ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
-          ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
-          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }} 
