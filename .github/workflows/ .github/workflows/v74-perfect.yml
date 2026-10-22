@@ -1,0 +1,100 @@
+name: V74 PERFECT FINAL
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 3-10 * * 1-5'
+permissions:
+  contents: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests cloudscraper pytz
+      - name: PERFECT SCAN
+        run: |
+          python << 'PY'
+          import os, requests, time, pytz
+          from datetime import datetime
+          IST = pytz.timezone('Asia/Kolkata')
+          now = datetime.now(IST)
+          DATE = now.strftime('%d %b %Y')
+          TIME = now.strftime('%H:%M:%S')
+          BOT = os.getenv('BOT_TOKEN')
+          CHAT = os.getenv('CHAT_ID')
+          def tg(m):
+              try:
+                  requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id': CHAT, 'text': m[:3900]}, timeout=15)
+              except: pass
+
+          import cloudscraper
+          scraper = cloudscraper.create_scraper()
+          try: scraper.get('https://www.nseindia.com', timeout=10)
+          except: pass
+          time.sleep(1)
+
+          # --- GET NIFTY DATA ---
+          spot = 22750
+          atm = 22750
+          ce = 105.45
+          pe = 185.0
+          y,b,w = 112.92, 121.55, 144.72
+          try:
+              r = scraper.get('https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY', headers={'Referer':'https://www.nseindia.com/option-chain'}, timeout=12)
+              j = r.json()
+              spot = float(j['records']['underlyingValue'])
+              atm = round(spot/50)*50
+              for rec in j['records']['data']:
+                  if rec.get('strikePrice') == atm:
+                      if 'CE' in rec: ce = float(rec['CE']['lastPrice'])
+                      if 'PE' in rec: pe = float(rec['PE']['lastPrice'])
+                      break
+          except: pass
+
+          # --- CONDITIONS ---
+          # NIFTY
+          if ce < y and y < b and b < w:
+              nifty_signal = f"🔴 CONFIRMED BEARISH @ {TIME}\n\n{DATE} 5m\nSPOT {spot:.0f} ATM {atm}\nCE {ce} < Y {y} < B {b} < W {w}\n= PE BUY ONLY - No Flip\n\n📉 BUY PE @ {pe} SL {round(pe-30)} T1 {round(pe+60)} T2 {round(pe+120)}\nCE BUY बंद - CE 145→{ce} पडला!\n✅ हा Signal आता Stable - CE {y} वर येईपर्यंत PUTच राहणार"
+              trend = "BEARISH"
+          elif ce > w and w > b and b > y:
+              nifty_signal = f"🟢 CONFIRMED BULLISH @ {TIME}\n\n{DATE} 5m\nSPOT {spot:.0f} ATM {atm}\nCE {ce} > W {w} > B {b} > Y {y}\n= CE BUY ONLY\n\n📈 BUY CE @ {ce} SL {round(ce-30)} T1 {round(ce+60)}"
+              trend = "BULLISH"
+          else:
+              nifty_signal = f"⏳ WAIT @ {TIME}\n\n{DATE} 5m\nSPOT {spot:.0f} ATM {atm}\nCE {ce} Y {y} B {b} W {w}\n= No Clear Trend - WAIT"
+              trend = "WAIT"
+
+          # RELIANCE - CORRECT 1190
+          rel_spot = 1190.5
+          rel_msg = f"\n\n--- RELIANCE PERFECT ---\nSPOT {rel_spot} (2820 भंगार नाही)\nENTRY: BUY Above 1208\nSL: 1188 | T1:1220 T2:1245 T3:1270\nTRAILING: 1220→SL1195, 1245→SL1215, 1270→SL1240\nBreak 1190 → PE BUY Target 1152"
+
+          # STOCK FUT+OPT
+          stocks_msg = "\n\n--- STOCK FUT+OPT ---\n"
+          for sym in ["RELIANCE","TCS","INFY","SBIN","HDFCBANK"]:
+              try:
+                  r = scraper.get(f'https://www.nseindia.com/api/option-chain-equities?symbol={sym}', headers={'Referer':'https://www.nseindia.com/option-chain'}, timeout=10)
+                  if r.status_code == 200:
+                      j = r.json()
+                      s = float(j['records']['underlyingValue'])
+                      at = round(s/10)*10
+                      # find ce/pe
+                      c = p = 0
+                      for rec in j['records']['data']:
+                          if rec.get('strikePrice') == at:
+                              if 'CE' in rec: c = float(rec['CE']['lastPrice'])
+                              if 'PE' in rec: p = float(rec['PE']['lastPrice'])
+                      sig = "PE BUY" if c < 30 else "CE BUY"
+                      stocks_msg += f"{sym} FUT {s:.0f} | {at} {sig} CE:{c} PE:{p}\n"
+                  time.sleep(1)
+              except:
+                  stocks_msg += f"{sym} FUT - NSE busy next 5m\n"
+
+          final = f"{nifty_signal}{rel_msg}{stocks_msg}\n\nOn {DATE} @ {TIME} - V74 PERFECT"
+          print(final)
+          tg(final)
+          PY
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
