@@ -1,16 +1,13 @@
-name: FINAL NIFTY ONLY
+name: FINAL V41
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/15 3-10 * * 1-5'
-
+    - cron: '*/20 3-10 * * 1-5'
 concurrency:
-  group: nifty-scanner-final
-  cancel-in-progress: false
-
+  group: v41-final
+  cancel-in-progress: true
 permissions:
   contents: write
-
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -18,63 +15,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      
       - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
-      
+        with:
+          python-version: '3.11'
       - run: pip install requests cloudscraper pytz
-      
-      - name: V38 NO REPEAT EVER
-        run: |
-          python -c "
-          import os, requests, json, pathlib, pytz, datetime, time
-          BOT=os.getenv('TELEGRAM_BOT_TOKEN') or os.getenv('BOT_TOKEN')
-          CHAT=os.getenv('TELEGRAM_CHAT_ID') or os.getenv('CHAT_ID')
-          IST=pytz.timezone('Asia/Kolkata')
-          now=datetime.datetime.now(IST)
-          STATE=pathlib.Path('last_signal.json')
-          
-          def tg(m):
-            requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id':CHAT,'text':m}, timeout=15)
-          
-          # Load
-          last={}
-          if STATE.exists():
-            try: last=json.loads(STATE.read_text()); print(f'Found last: {last}')
-            except: last={}
-          
-          # DEDUP CHECK - 2 HOURS BLOCK
-          if last:
-            try:
-              last_t=datetime.datetime.fromisoformat(last['time'])
-              diff=(now-last_t).total_seconds()/3600
-              if diff < 2:
-                print(f'SKIP - Last sent {diff:.2f} hr ago at {last_t}. NO TELEGRAM')
-                exit(0)
-            except Exception as e:
-              print(f'Parse err {e}')
-          
-          # Live price - now same for demo but will be live
-          spot=22894; atm=22900; price=135; direction='PUT'
-          print(f'NEW SIGNAL ALLOWED - Spot {spot} ATM {atm}')
-          
-          sl=round(price*0.7,1); t1=round(price*1.5,1); t2=round(price*2.5,1); t3=round(price*3.5,1)
-          msg=f'✅ FINAL NIFTY {direction} @ {now.strftime(\"%H:%M\")} IST\nSpot:{spot} ATM:{atm}\nBUY {atm} PE @ {price} LIVE\nSL:{sl} T1:{t1} T2:{t2} T3:{t3}\nPrev was {last.get(\"key\",\"None\")} at {last.get(\"time\",\"\")} - Now New'
-          tg(msg)
-          
-          STATE.write_text(json.dumps({'key':f'{now.strftime(\"%Y-%m-%d\")}_{direction}_{atm}','time':now.isoformat(),'spot':spot,'price':price}, indent=2))
-          "
+      - run: python scanner.py
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      
-      - name: Save State Back to GitHub
-        run: |
-          git pull --rebase
-          git config user.name "nifty-bot"
-          git config user.email "bot@nifty.com"
-          git add last_signal.json
-          git commit -m "last signal $(date)" || echo "no change"
-          git push 
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - run: |
+          git config user.name "v41"
+          git config user.email "v41@bot.com"
+          git pull --rebase || true
+          git add last_signal_v41.json
+          git commit -m "V41 $(date)" || true
+          git push || true 
