@@ -1,0 +1,107 @@
+name: V82 FORCE ATM BUY 20PT
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 3-10 * * 1-5'
+permissions:
+  contents: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests cloudscraper pytz pandas numpy
+      - name: V82 FORCE
+        run: |
+          python << 'PY'
+          import os, requests, time, pytz
+          import pandas as pd
+          from datetime import datetime
+          IST = pytz.timezone('Asia/Kolkata')
+          now = datetime.now(IST)
+          TIME = now.strftime('%H:%M:%S')
+          DATE = now.strftime('%d %b %Y')
+          BOT = os.getenv('BOT_TOKEN')
+          CHAT = os.getenv('CHAT_ID')
+          def tg(m):
+              try:
+                  for i in range(0, len(m), 3800):
+                      requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id': CHAT, 'text': m[i:i+3800]}, timeout=15)
+                      time.sleep(1)
+              except: pass
+
+          def get_signal(symbol_yahoo, name):
+              try:
+                  url=f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol_yahoo}?range=5d&interval=15m"
+                  r=requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=12).json()
+                  res=r['chart']['result'][0]
+                  closes=res['indicators']['quote'][0]['close']
+                  volumes=res['indicators']['quote'][0]['volume']
+                  highs=res['indicators']['quote'][0]['high']
+                  lows=res['indicators']['quote'][0]['low']
+                  df=pd.DataFrame({'close':closes,'high':highs,'low':lows,'volume':volumes}).dropna()
+                  if len(df)<25: return None
+                  df['volume'] = df['volume'].replace(0, 100000)
+                  df['volume'] = df['volume'].fillna(100000)
+                  df['9EMA']=df['close'].ewm(span=9, adjust=False).mean()
+                  df['21EMA']=df['close'].ewm(span=21, adjust=False).mean()
+                  df['TP']=(df['high']+df['low']+df['close'])/3
+                  df['PV']=df['TP']*df['volume']
+                  df['VWAP']=df['PV'].cumsum()/df['volume'].cumsum()
+                  df['VWAP']=df['VWAP'].fillna(df['21EMA'])
+                  delta=df['close'].diff()
+                  gain=(delta.where(delta>0,0)).rolling(14).mean()
+                  loss=(-delta.where(delta<0,0)).rolling(14).mean()
+                  df['RSI']=100-(100/(1+gain/loss))
+                  c=df.iloc[-1]; p=df.iloc[-2]
+                  spot=float(c['close'])
+                  ema=float(c['9EMA']); vwap=float(c['VWAP']); rsi=float(c['RSI'])
+                  atm = round(spot/50)*50 if spot>5000 else round(spot/10)*10
+                  ce=pe=0
+                  try:
+                      import cloudscraper
+                      scraper=cloudscraper.create_scraper()
+                      scraper.get('https://www.nseindia.com', timeout=8)
+                      sym_nse = "NIFTY" if name=="NIFTY" else name
+                      api_url = f'https://www.nseindia.com/api/option-chain-indices?symbol={sym_nse}' if name=="NIFTY" else f'https://www.nseindia.com/api/option-chain-equities?symbol={sym_nse}'
+                      rr=scraper.get(api_url, headers={'Referer':'https://www.nseindia.com/option-chain'}, timeout=12).json()
+                      for rec in rr['records']['data']:
+                          if rec.get('strikePrice')==atm:
+                              if 'CE' in rec: ce=float(rec['CE']['lastPrice'])
+                              if 'PE' in rec: pe=float(rec['PE']['lastPrice'])
+                  except: ce=105; pe=185
+                  if ce==0: ce=105
+                  if pe==0: pe=185
+                  # FORCE BUY - Trend वर
+                  if ema > vwap:
+                      cross = "CROSS UP" if float(p['9EMA'])<=float(p['VWAP']) else "TREND UP"
+                      return f"🟢 {name} CE BUY @ {TIME}\nSPOT {spot:.0f} ATM {atm} | 9EMA {ema:.0f} {'>' if ema>vwap else '<'} VWAP {vwap:.0f} {cross} RSI {rsi:.0f} ✅\n📈 BUY {atm} CE @ {ce:.0f}\nSL {ce-20:.0f} (20Pt) T1 {ce+40:.0f} (+40) T2 {ce+80:.0f} (+80) T3 {ce+120:.0f} (+120)\nTRAIL: T1->{ce:.0f} Cost | T2->{ce+40:.0f} Lock 40 | T3->{ce+80:.0f} Lock 80\n"
+                  else:
+                      cross = "CROSS DOWN" if float(p['9EMA'])>=float(p['VWAP']) else "TREND DOWN"
+                      return f"🔴 {name} PE BUY @ {TIME}\nSPOT {spot:.0f} ATM {atm} | 9EMA {ema:.0f} {'>' if ema>vwap else '<'} VWAP {vwap:.0f} {cross} RSI {rsi:.0f} ✅\n📉 BUY {atm} PE @ {pe:.0f}\nSL {pe-20:.0f} (20Pt) T1 {pe+40:.0f} (+40) T2 {pe+80:.0f} (+80) T3 {pe+120:.0f} (+120)\nTRAIL: T1->{pe:.0f} Cost | T2->{pe+40:.0f} Lock 40 | T3->{pe+80:.0f} Lock 80\n"
+              except Exception as e:
+                  return f"⏳ {name} Error {str(e)[:30]}\n"
+
+          all_syms = [
+            ("%5ENSEI","NIFTY"), ("RELIANCE.NS","RELIANCE"), ("TCS.NS","TCS"), ("INFY.NS","INFY"), ("HDFCBANK.NS","HDFCBANK"), ("ICICIBANK.NS","ICICIBANK"),
+            ("SBIN.NS","SBIN"), ("BHARTIARTL.NS","BHARTIARTL"), ("LT.NS","LT"), ("ITC.NS","ITC"), ("KOTAKBANK.NS","KOTAKBANK"),
+            ("AXISBANK.NS","AXISBANK"), ("BAJFINANCE.NS","BAJFINANCE"), ("MARUTI.NS","MARUTI"), ("WIPRO.NS","WIPRO"), ("TATAMOTORS.NS","TATAMOTORS"),
+            ("SUNPHARMA.NS","SUNPHARMA"), ("TITAN.NS","TITAN"), ("NTPC.NS","NTPC"), ("ONGC.NS","ONGC")
+          ]
+
+          final_msg = f"🔥 V82 FORCE ATM BUY @ {DATE} {TIME}\n20 Point SL T1 +40 T2 +80 T3 +120 TRAIL\n\n"
+          for sym, name in all_syms:
+              sig = get_signal(sym, name)
+              if sig: final_msg += sig + "\n"
+              time.sleep(0.6)
+
+          final_msg += "\n--- RELIANCE SPECIAL ---\nENTRY Above 1208 SL 1188 (20Pt) T1 1220 T2 1245 T3 1270 TRAIL 1220->1195\nV82 FORCE ATM BUY"
+          print(final_msg)
+          tg(final_msg)
+          PY
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
