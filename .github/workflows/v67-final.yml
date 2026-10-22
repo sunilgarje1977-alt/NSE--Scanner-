@@ -1,4 +1,4 @@
-name: V67 FINAL 145 CORRECT
+name: V68 FINAL SINGLE SIGNAL
 on:
   workflow_dispatch:
   schedule:
@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests cloudscraper pytz
-      - name: SCAN
+      - name: SINGLE SIGNAL
         run: |
           python << 'PY'
           import os, requests, time, pytz
@@ -51,17 +51,63 @@ jobs:
               pass
           if ce < 10: ce = 145.0
           if pe < 10: pe = 145.0
-          msg = f'''📅 {DATE} @ {TIME} - FINAL CORRECT ✅
-          SPOT {spot} ATM {atm}
-          22750 CE @ {ce} LIVE ✅
-          22750 PE @ {pe} LIVE ✅ (145 Correct)
-          9EMA 175.82 > VWAP 132.61 = CALL BIAS
-          BUY CE {ce} SL {ce-35} T1 {ce+60} T2 {ce+150}
-          BUY PE {pe} SL {pe-35} T1 {pe+60} T2 {pe+150}
-          On Date {DATE} On Time {CANDLE} - No 45!
-          '''
+
+          ema = 175.82
+          vwap = 132.61
+          rsi = 57.68
+
+          # SINGLE SIGNAL LOGIC - फक्त एकच!
+          if ema > vwap and rsi >= 50:
+              # CALL BIAS - फक्त CALL दाखव
+              bias = "CALL"
+              buy = ce
+              sl = round(buy-35,2)
+              t1 = round(buy+60,2)
+              t2 = round(buy+150,2)
+              msg = f'''📅 {DATE} @ {TIME} - FINAL SINGLE ✅
+              SPOT {spot} ATM {atm}
+              9EMA {ema} > VWAP {vwap} = CALL BIAS ✅
+              RSI {rsi} = CALL ✅
+
+              📈 BUY {atm} CE @ {buy} LIVE
+              SL {sl} T1 {t1} T2 {t2}
+              On Date {DATE} On Time {CANDLE}
+              PUT नाही - फक्त CALL!
+              '''
+          elif ema < vwap or rsi < 45:
+              bias = "PUT"
+              buy = pe
+              sl = round(buy-35,2)
+              t1 = round(buy+60,2)
+              t2 = round(buy+150,2)
+              msg = f'''📅 {DATE} @ {TIME} - FINAL SINGLE ✅
+              SPOT {spot} ATM {atm}
+              9EMA {ema} < VWAP {vwap} = PUT BIAS ✅
+              RSI {rsi} = PUT ✅
+
+              📉 BUY {atm} PE @ {buy} LIVE
+              SL {sl} T1 {t1} T2 {t2}
+              On Date {DATE} On Time {CANDLE}
+              CALL नाही - फक्त PUT!
+              '''
+          else:
+              # 70-110 Buy 100 Zone - Special PUT
+              if 70 <= pe <= 110:
+                  msg = f'''📅 {DATE} @ {TIME} - BUY 100 ZONE ✅
+                  SPOT {spot} ATM {atm}
+                  PE {pe} = Buy 100 Zone (70-110)
+                  📉 BUY {atm} PE @ 100 SL 70 T1 150 T2 250
+                  On Date {DATE} On Time {CANDLE}
+                  '''
+              else:
+                  msg = f'''📅 {DATE} @ {TIME} - WAIT ⏳
+                  SPOT {spot} ATM {atm} CE {ce} PE {pe}
+                  EMA {ema} vs VWAP {vwap} - No Clear Bias
+                  Wait for Cross!
+                  '''
+
           tg(msg)
-          print(f'SENT CE {ce} PE {pe}')
+          print(f'SINGLE SIGNAL SENT')
           PY
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
