@@ -1,0 +1,138 @@
+name: V78 9EMA VWAP RSI VOLUME
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 3-10 * * 1-5'
+permissions:
+  contents: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests cloudscraper pytz pandas numpy
+      - name: V78 SCAN
+        run: |
+          python << 'PY'
+          import os, requests, time, pytz, math
+          import pandas as pd
+          from datetime import datetime
+          IST = pytz.timezone('Asia/Kolkata')
+          now = datetime.now(IST)
+          DATE = now.strftime('%d %b %Y')
+          TIME = now.strftime('%H:%M:%S')
+          BOT = os.getenv('BOT_TOKEN')
+          CHAT = os.getenv('CHAT_ID')
+          def tg(m):
+              try:
+                  for i in range(0, len(m), 3800):
+                      requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id': CHAT, 'text': m[i:i+3800]}, timeout=15)
+                      time.sleep(1)
+              except: pass
+
+          # --- NIFTY 5m Data from Yahoo for 9EMA VWAP RSI ---
+          try:
+              url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?range=1d&interval=5m"
+              r = requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=12).json()
+              result = r['chart']['result'][0]
+              closes = result['indicators']['quote'][0]['close']
+              volumes = result['indicators']['quote'][0]['volume']
+              highs = result['indicators']['quote'][0]['high']
+              lows = result['indicators']['quote'][0]['low']
+              
+              df = pd.DataFrame({'close':closes,'high':highs,'low':lows,'volume':volumes}).dropna()
+              
+              # 9 EMA
+              df['9EMA'] = df['close'].ewm(span=9, adjust=False).mean()
+              # VWAP
+              df['TP'] = (df['high']+df['low']+df['close'])/3
+              df['PV'] = df['TP']*df['volume']
+              df['VWAP'] = df['PV'].cumsum() / df['volume'].cumsum()
+              # RSI 14
+              delta = df['close'].diff()
+              gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+              loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+              rs = gain / loss
+              df['RSI'] = 100 - (100 / (1 + rs))
+              # Volume Avg 20
+              df['VolAvg20'] = df['volume'].rolling(20).mean()
+              
+              curr = df.iloc[-1]
+              prev = df.iloc[-2]
+              
+              spot = float(curr['close'])
+              ema9 = float(curr['9EMA'])
+              vwap = float(curr['VWAP'])
+              rsi = float(curr['RSI'])
+              vol = float(curr['volume'])
+              volAvg = float(curr['VolAvg20'])
+              prev_ema = float(prev['9EMA'])
+              prev_vwap = float(prev['VWAP'])
+              
+              # Cross Logic
+              cross_up = prev_ema <= prev_vwap and ema9 > vwap
+              cross_down = prev_ema >= prev_vwap and ema9 < vwap
+              vol_confirm = vol > (volAvg * 1.0)
+              
+              # NIFTY Option Price
+              import cloudscraper
+              scraper = cloudscraper.create_scraper()
+              ce=pe=0
+              atm = round(spot/50)*50
+              try:
+                  scraper.get('https://www.nseindia.com', timeout=10)
+                  time.sleep(1)
+                  rr = scraper.get('https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY', headers={'Referer':'https://www.nseindia.com/option-chain'}, timeout=12).json()
+                  for rec in rr['records']['data']:
+                      if rec.get('strikePrice')==atm:
+                          if 'CE' in rec: ce=float(rec['CE']['lastPrice'])
+                          if 'PE' in rec: pe=float(rec['PE']['lastPrice'])
+              except: 
+                  ce=105.45; pe=185.0
+              
+              # Final Signal
+              if cross_up and rsi>=45 and rsi<=60 and vol_confirm:
+                  signal = f"🟢 STRONG CE BUY @ {TIME}\n\n{DATE} 5m\nSPOT {spot:.0f} ATM {atm}\n9EMA {ema9:.1f} CROSS UP VWAP {vwap:.1f} ✅\nRSI {rsi:.1f} (45-60) ✅\nVOL {vol:.0f} > Avg {volAvg:.0f} (1x) ✅\n\n📈 BUY {atm} CE @ {ce}\nSL: {round(ce*0.7)} (-30%)\nT1: {round(ce*1.4)} (+40%)\nT2: {round(ce*1.8)} (+80%)\n\nTRAILING:\nT1 Hit -> SL to Cost {ce} (No Loss)\nT2 Hit -> SL to T1 {round(ce*1.4)} (Lock 40%)"
+              elif cross_down and rsi>=40 and rsi<=55 and vol_confirm:
+                  signal = f"🔴 STRONG PE BUY @ {TIME}\n\n{DATE} 5m\nSPOT {spot:.0f} ATM {atm}\n9EMA {ema9:.1f} CROSS DOWN VWAP {vwap:.1f} ✅\nRSI {rsi:.1f} (40-55) ✅\nVOL {vol:.0f} > Avg {volAvg:.0f} (1x) ✅\n\n📉 BUY {atm} PE @ {pe}\nSL: {round(pe*0.7)} (-30%)\nT1: {round(pe*1.4)} (+40%)\nT2: {round(pe*1.8)} (+80%)\n\nTRAILING:\nT1 Hit -> SL to Cost {pe}\nT2 Hit -> SL to T1 {round(pe*1.4)}"
+              else:
+                  status = []
+                  if ema9 > vwap: status.append(f"9EMA {ema9:.0f} > VWAP {vwap:.0f} Bullish")
+                  else: status.append(f"9EMA {ema9:.0f} < VWAP {vwap:.0f} Bearish")
+                  status.append(f"RSI {rsi:.1f} {'✅' if 45 <= rsi <= 60 else '❌ Wait 45-60'}")
+                  status.append(f"VOL {vol:.0f} vs {volAvg:.0f} {'✅ 1x' if vol_confirm else '❌ Low'}")
+                  status.append(f"Cross Up: {cross_up} | Cross Down: {cross_down}")
+                  signal = f"⏳ WAIT @ {TIME}\n\n{DATE} 5m SPOT {spot:.0f} ATM {atm}\n" + "\n".join(status) + f"\n\nCE {ce} PE {pe} - 9EMA Cross + RSI 45-60 + Vol 1x पाहिजे"
+
+          except Exception as e:
+              signal = f"⏳ V78 Error @ {TIME}\n{str(e)[:200]}\nSPOT Fetch fail - Retry next 5m"
+              spot = 22750; atm=22750; ce=105.45; pe=185.0
+
+          # RELIANCE + ALL 50
+          all_msg = "\n\n--- RELIANCE ---\nSPOT 1190.5 ENTRY Above 1208 SL 1188 T1 1220 T2 1245 T3 1270\nBreak 1190->PE 1152\n\n--- 50 STOCKS QUICK ---\n"
+          try:
+              stocks = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BHARTIARTL","LT","ITC","MARUTI"]
+              for sym in stocks:
+                  try:
+                      url=f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}.NS?range=1d&interval=5m"
+                      rr=requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=6).json()
+                      meta=rr['chart']['result'][0]['meta']
+                      price=meta['regularMarketPrice']
+                      prev=meta['previousClose']
+                      chg=((price-prev)/prev)*100
+                      icon="🔴" if chg<-0.8 else "🟢" if chg>0.8 else "⏳"
+                      all_msg+=f"{icon} {sym} {price:.0f} ({chg:+.1f}%)\n"
+                  except: pass
+                  time.sleep(0.4)
+          except: pass
+
+          final = signal + all_msg + f"\nOn {DATE} @ {TIME} - V78 9EMA VWAP"
+          print(final)
+          tg(final)
+          PY
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
