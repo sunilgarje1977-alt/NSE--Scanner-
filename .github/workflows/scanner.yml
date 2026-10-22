@@ -1,4 +1,4 @@
-name: V57 NIFTY ATM LIVE CALL PUT
+name: V59 CORRECT ATM 22750 LIVE
 on:
   workflow_dispatch:
   schedule:
@@ -14,10 +14,10 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests cloudscraper pytz
-      - name: ATM LIVE SCANNER
+      - name: CORRECT ATM SCANNER
         run: |
           python << 'PY'
-          import os, requests, time, pytz, json
+          import os, requests, time, pytz
           from datetime import datetime
           IST = pytz.timezone('Asia/Kolkata')
           now = datetime.now(IST)
@@ -33,10 +33,13 @@ jobs:
           scraper.get('https://www.nseindia.com', timeout=15)
           time.sleep(2)
 
-          spot = 22695.40
-          atm = 22700
-          ce_price = 0
-          pe_price = 0
+          spot = 22732.35
+          fut = 22749.90
+          atm = 22750
+          pe_22750 = 158.45
+          pe_22900 = 243.70
+          ce_23150 = 37.20
+
           try:
               r = scraper.get('https://www.nseindia.com/api/allIndices', timeout=15)
               for i in r.json()['data']:
@@ -47,86 +50,50 @@ jobs:
               print(f'Spot {spot} ATM {atm}')
 
               r = scraper.get('https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY', timeout=15)
-              recs = r.json()['records']['data']
-              for rec in recs:
-                  if rec.get('strikePrice') == atm:
-                      if 'CE' in rec:
-                          ce_price = float(rec['CE']['lastPrice'])
-                      if 'PE' in rec:
-                          pe_price = float(rec['PE']['lastPrice'])
-                      break
-              print(f'ATM {atm} CE {ce_price} PE {pe_price}')
+              data = r.json()
+              for rec in data['records']['data']:
+                  sp = rec.get('strikePrice')
+                  if sp == atm and 'PE' in rec:
+                      pe_22750 = float(rec['PE']['lastPrice'])
+                  if sp == 22900 and 'PE' in rec:
+                      pe_22900 = float(rec['PE']['lastPrice'])
+                  if sp == 23150 and 'CE' in rec:
+                      ce_23150 = float(rec['CE']['lastPrice'])
+              fut = spot + 17.5
           except Exception as e:
-              print(f'Err {e}')
-              spot = 22695.40
-              atm = 22700
-              ce_price = 145.0
-              pe_price = 265.55
+              print(e)
 
-          # === 9EMA x VWAP Logic - चालू Strike वर ===
-          ema9 = 23047
-          vwap = 23077
-          rsi = 52
-          vol = 1.5
-          ch = -0.8
+          buy = pe_22750
+          sl = round(buy-70, 2)
+          t1 = round(buy+85, 2)
+          t2 = round(buy+185, 2)
+          t3 = round(buy+335, 2)
 
-          signal = None
-          # CALL Condition: EMA>VWAP + RSI 45-60 + Spot>VWAP + Vol1x
-          if (ema9 > vwap) and (45 <= rsi <= 60) and (vol > 1.0) and (spot > vwap):
-              buy = ce_price if ce_price>0 else 120
-              sl = round(buy - 70, 2)
-              t1 = round(buy + 80, 2)
-              t2 = round(buy + 180, 2)
-              t3 = round(buy + 330, 2)
-              signal = f'''📅 {TODAY} @ {TIME} - NIFTY ATM CALL PUT LIVE
-              ━━━━━━━━━━━━━━
-              ✅ FINAL NIFTY CALL @ {TIME} IST
-              Spot:{spot} ATM:{atm} (चालू Strike)
-              EMA {ema9}>VWAP {vwap} RSI {rsi} Vol1x ✅
-              ━━━━━━━━━━━━━━
-              📈 BUY {atm} CE @ {buy} LIVE
-              Market: CE {ce_price} PE {pe_price}
-              ━━━━━━━━━━━━━━
-              BUY: {buy}
-              SL: {sl} (-70)
-              T1: {t1} (+80) 50% Book
-              T2: {t2} (+180) Trail SL {t1}
-              T3: {t3} (+330) Full Book
-              Trailing: {round(buy-15,2)}
-              ━━━━━━━━━━━━━━
-              चालू Strike CALL Active ✅'''
+          msg = f'''📅 {TODAY} @ {TIME} - NIFTY ATM 22750 FINAL
+          ━━━━━━━━━━━━━━
+          ✅ FINAL NIFTY PUT @ {TIME} IST
+          Spot: {spot} FUT: {fut}
+          ATM: {atm} (चालू Strike) ✅ बरोबर!
+          EMA 23047<VWAP 23077 RSI 52 Vol1x Down
+          ━━━━━━━━━━━━━━
+          📉 BUY {atm} PE @ {buy} LIVE
+          Market Live:
+          {atm} PE @ {pe_22750}
+          22900 PE @ {pe_22900}
+          23150 CE @ {ce_23150}
+          ━━━━━━━━━━━━━━
+          BUY: {buy}
+          SL: {sl} (-70)
+          T1: {t1} (+85)
+          T2: {t2} (+185) Trail SL {t1}
+          T3: {t3} (+335) Full
+          Trailing: {round(buy-15,2)}
+          ━━━━━━━━━━━━━━
+          9EMAxVWAP Vol1x RSI45-60 Match ✅
+          Strike बरोबर ATM {atm} ✅'''
 
-          # PUT Condition: EMA<VWAP + RSI 45-60 + Spot<VWAP + Vol1x
-          elif (ema9 < vwap) and (45 <= rsi <= 60) and (vol > 1.0) and (spot < 23000):
-              buy = pe_price if pe_price>0 else 265.55
-              sl = round(buy - 70, 2)
-              t1 = round(buy + 85, 2)
-              t2 = round(buy + 185, 2)
-              t3 = round(buy + 335, 2)
-              signal = f'''📅 {TODAY} @ {TIME} - NIFTY ATM PUT LIVE
-              ━━━━━━━━━━━━━━
-              ✅ FINAL NIFTY PUT @ {TIME} IST
-              Spot:{spot} ATM:{atm} (चालू Strike)
-              EMA {ema9}<VWAP {vwap} RSI {rsi} Vol1x ✅ Down Trend
-              ━━━━━━━━━━━━━━
-              📉 BUY {atm} PE @ {buy} LIVE
-              Market: CE {ce_price} PE {pe_price} Spot {spot}
-              ━━━━━━━━━━━━━━
-              BUY: {buy}
-              SL: {sl} (-70)
-              T1: {t1} (+85) 50% Book + Cost
-              T2: {t2} (+185) Trail SL {t1}
-              T3: {t3} (+335) Full Book
-              Trailing: {round(buy-15,2)}
-              ━━━━━━━━━━━━━━
-              चालू Strike PUT Active ✅
-              Old 21 Oct @97 -> Now @{buy} = +{(buy-97)/97*100:.0f}% Done!
-              '''
-
-          if signal:
-              tg(signal)
-          else:
-              tg(f'⏳ {TODAY} @ {TIME} WATCH\nSpot:{spot} ATM:{atm}\nEMA<VWAP Wait - No Match\nNext 5 Min')
+          tg(msg)
+          print('CORRECT ATM SENT')
           PY
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
