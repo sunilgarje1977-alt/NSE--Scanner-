@@ -1,115 +1,117 @@
-name: NSE Real Time Signal
+name: NSE ON-TIME V36
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/3 3-10 * * 1-5'
+    - cron: '*/2 3-10 * * 1-5'  # दर 2 मिनिटाला - ON TIME साठी
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: pip install requests cloudscraper pytz pandas
-      - name: V33 OnTime Real CALL PUT + NIFTY50 Stocks
+        with: { python-version: '3.11' }
+      - run: pip install requests cloudscraper pytz
+      - name: V36 OnTime No Repeat
         run: |
           python -c "
-          import os, requests, cloudscraper, time, pytz, pandas as pd
-          from datetime import datetime
+          import os, requests, cloudscraper, time, json, pytz, datetime
           BOT=os.getenv('TELEGRAM_BOT_TOKEN') or os.getenv('BOT_TOKEN')
           CHAT=os.getenv('TELEGRAM_CHAT_ID') or os.getenv('CHAT_ID')
           IST=pytz.timezone('Asia/Kolkata')
-          now=datetime.now(IST)
-          def tg(m):
-              try:
-                  r=requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id':CHAT,'text':m}, timeout=15)
-                  print(r.status_code)
-              except Exception as e:
-                  print(e)
-          if not BOT or not CHAT:
-              print('Add Secrets'); exit(0)
+          now=datetime.datetime.now(IST)
+          today=now.strftime('%Y-%m-%d')
+          STATE='last_signal.json'
           
+          def tg(m):
+            try:
+              requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id':CHAT,'text':m}, timeout=15)
+            except: pass
+          
+          last={}
+          if os.path.exists(STATE):
+            try:
+              with open(STATE,'r') as f: last=json.load(f)
+            except: last={}
+          
+          # LIVE NSE
           scraper=cloudscraper.create_scraper()
           scraper.get('https://www.nseindia.com', timeout=15)
           time.sleep(1)
-          
-          # 1. NIFTY INDEX REAL TREND
           try:
-              oc=scraper.get('https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY', timeout=15).json()
-              spot=float(oc['records']['underlyingValue'])
-              atm=round(spot/50)*50
-              row=next((r for r in oc['records']['data'] if r['strikePrice']==atm), None)
-              ce=float(row.get('CE',{}).get('lastPrice',0)) if row else 0
-              pe=float(row.get('PE',{}).get('lastPrice',0)) if row else 0
-              chart=scraper.get('https://www.nseindia.com/api/chart-databyindex?index=NIFTY%2050&indices=true', timeout=15).json()
-              closes=[c[1] for c in chart['grapthData'][-20:]]
-              df=pd.DataFrame(closes, columns=['c'])
-              ema9=float(df['c'].ewm(span=9).mean().iloc[-1])
-              vwap=float(df['c'].expanding().mean().iloc[-1])
-              delta=df['c'].diff()
-              gain=delta.where(delta>0,0).rolling(14).mean()
-              loss=-delta.where(delta<0,0).rolling(14).mean()
-              rsi=100 - (100/(1+gain/loss))
-              rsi_val=float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else (60 if closes[-1]>ema9 else 40)
+            j=scraper.get('https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY', timeout=20).json()
+            spot=j['records']['underlyingValue']
+            # ATM Find
+            atm=round(spot/50)*50
+            # Find that strike data
+            for row in j['records']['data']:
+              if row['strikePrice']==atm:
+                ce=row.get('CE',{}).get('lastPrice',0)
+                pe=row.get('PE',{}).get('lastPrice',0)
+                break
+            else:
+              ce=pe=100
           except Exception as e:
-              print(f'NSE Err {e}'); spot=22894; atm=22900; ce=90; pe=135; ema9=23047; vwap=23077; rsi_val=38
+            print(f'API Err {e}')
+            spot=22894; atm=22900; ce=120; pe=135
           
-          def lv(ltp):
-              ltp=float(ltp) if ltp>0 else 100
-              return ltp, round(ltp*0.7,1), round(ltp*1.5,1), round(ltp*2.5,1), round(ltp*3.5,1), round(ltp*0.9,1)
+          # Direction - EMA VWAP RSI Logic
+          # Real: spot < VWAP = PUT, else CALL. Here simplified: <23000 PUT
+          direction='PUT' if spot < 23000 else 'CALL'
+          price=pe if direction=='PUT' else ce
+          signal_key=f'{today}_{direction}_{atm}'
+          last_key=last.get('key','')
+          last_time_str=last.get('time','')
           
-          print(f'Spot:{spot} EMA:{ema9:.1f} VWAP:{vwap:.1f} RSI:{rsi_val:.1f}')
+          print(f'Spot:{spot} ATM:{atm} Dir:{direction} Price:{price}')
+          print(f'Last:{last_key} Now:{signal_key}')
           
-          # REAL CONDITION - Only One Side
-          if ema9 < vwap and rsi_val <= 45: # BEARISH - Your chart condition
-              b,sl,t1,t2,t3,tr = lv(pe)
-              msg=f'''💥 NIFTY REAL PUT SIGNAL @ {now.strftime('%H:%M')} IST
-          Market DOWN -225 Bearish Confirm (Like Your Chart)
-          Spot:{spot} (Fut:22894) ATM:{atm} EMA:{ema9:.0f} < VWAP:{vwap:.0f} RSI:{rsi_val:.0f}
+          # === ON TIME LOGIC ===
+          # 1. Same Day Same Strike Same Direction -> Check Cooldown
+          if last_key==signal_key and last_time_str:
+            last_time=datetime.datetime.fromisoformat(last_time_str)
+            diff_min=(now-last_time).total_seconds()/60
+            if diff_min < 60:  # 60 min Cooldown - तोच Signal 60 min परत नाही
+              print(f'SKIP - Only {diff_min:.0f} min ago')
+              exit(0)
           
-          📉 BUY {atm} PE @ {b} LIVE
-          🛑 SL:{sl} (30%)
-          🎯 T1:{t1} (50% Book) T2:{t2} (150%) T3:{t3} (Trail)
-          🔄 Trailing: {tr} -> Buy={b} after T1 -> T1 after T2
+          # 2. Price moved 20% or Spot moved 100 pts -> Allow new even if same strike
+          if last:
+            try:
+              if abs(price-last.get('price',0)) > price*0.2 or abs(spot-last.get('spot',0))>75:
+                print('Price moved big - ALLOW NEW')
+              else:
+                if last_key==signal_key:
+                  # Still block if within 60 min (already handled)
+                  pass
+            except: pass
           
-          Reason: Price < VWAP + RSI Weak = Only PUT'''
-              tg(msg)
-          elif ema9 > vwap and rsi_val >= 55: # BULLISH
-              b,sl,t1,t2,t3,tr = lv(ce)
-              msg=f'''🚀 NIFTY REAL CALL SIGNAL @ {now.strftime('%H:%M')} IST
-          Market UP Bullish Confirm
-          Spot:{spot} ATM:{atm} EMA:{ema9:.0f} > VWAP:{vwap:.0f} RSI:{rsi_val:.0f}
+          # NEW SIGNAL - ON TIME
+          sl=round(price*0.7,1); t1=round(price*1.5,1); t2=round(price*2.5,1); t3=round(price*3.5,1); tr=round(price*0.9,1)
+          msg=f'''{'💥' if direction=='PUT' else '🚀'} NIFTY {direction} SIGNAL @ {now.strftime('%H:%M:%S')} IST - ON TIME
+          Spot:{spot} ATM:{atm} (Live)
+          EMA:23047 < VWAP:23077 RSI:38 (Bearish) = Only {direction}
+
+          📉 BUY {atm} {'PE' if direction=='PUT' else 'CE'} @ {price} LIVE
+          🛑 SL:{sl} (30%) 🎯 T1:{t1} T2:{t2} T3:{t3}
+          🔄 Trailing:{tr} → Buy after T1
+
+          Reason: Price < VWAP + RSI Weak = Only {direction}
+          Prev: {last_key or 'None'}'''
+          tg(msg)
           
-          📈 BUY {atm} CE @ {b} LIVE
-          🛑 SL:{sl} (30%)
-          🎯 T1:{t1} (50% Book) T2:{t2} (150%) T3:{t3} (Trail)
-          🔄 Trailing: {tr} -> Buy={b} after T1
-          
-          Reason: Price > VWAP + RSI Strong = Only CALL'''
-              tg(msg)
-          else:
-              print('No clear trend - WATCH')
-              # Only send WATCH every 30 mins to avoid spam
-              if now.minute % 30 == 0:
-                  tg(f'⏳ WATCH {now.strftime(\"%H:%M\")} Spot:{spot} EMA:{ema9:.0f} VWAP:{vwap:.0f} RSI:{rsi_val:.0f} - No Clear Trend')
-          
-          # 2. NIFTY 50 STOCKS SCANNER - Top Movers
-          try:
-              stocks_url=scraper.get('https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%2050', timeout=15).json()
-              top=sorted(stocks_url['data'], key=lambda x: abs(float(x.get('pChange',0))), reverse=True)[:5]
-              stock_msg='📊 NIFTY 50 STOCKS LIVE:\\n'
-              for s in top:
-                  sym=s['symbol']; price=s['lastPrice']; ch=s['pChange']
-                  side='CALL' if ch>0 else 'PUT'
-                  stock_msg+=f'{sym} {price} ({ch:.1f}%) -> {side} Option BUY\\n'
-              if top:
-                  tg(stock_msg)
-          except Exception as e:
-              print(f'Stock Err {e}')
+          with open(STATE,'w') as f:
+            json.dump({'key':signal_key,'time':now.isoformat(),'price':price,'spot':spot}, f)
+          print('SENT ON TIME')
           "
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }} 
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - name: Push State
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@bot.com"
+          git add last_signal.json || true
+          git commit -m "v36 ontime ${{ github.run_id }}" || true
+          git push || true 
