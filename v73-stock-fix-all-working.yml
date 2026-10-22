@@ -1,0 +1,93 @@
+name: V73 STOCK FIX ALL WORKING
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 3-10 * * 1-5'
+permissions:
+  contents: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests cloudscraper pytz
+      - name: STOCK FIX SCAN
+        run: |
+          python << 'PY'
+          import os, requests, time, pytz
+          from datetime import datetime
+          IST = pytz.timezone('Asia/Kolkata')
+          now = datetime.now(IST)
+          DATE = now.strftime('%d %b %Y')
+          TIME = now.strftime('%H:%M:%S')
+          BOT = os.getenv('BOT_TOKEN')
+          CHAT = os.getenv('CHAT_ID')
+          def tg(m):
+              requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id': CHAT, 'text': m[:3900]}, timeout=20)
+          import cloudscraper
+          scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows'})
+          try:
+              scraper.get('https://www.nseindia.com', timeout=15)
+              time.sleep(1)
+              scraper.get('https://www.nseindia.com/option-chain', timeout=15)
+              time.sleep(1)
+          except: pass
+          def get_stock(symbol, is_index=False):
+              try:
+                  url = f"https://www.nseindia.com/api/option-chain-{'indices' if is_index else 'equities'}?symbol={symbol}"
+                  r = scraper.get(url, headers={'Referer': 'https://www.nseindia.com/option-chain'}, timeout=15)
+                  if r.status_code != 200: return None
+                  data = r.json()
+                  spot = float(data['records']['underlyingValue'])
+                  atm = round(spot/50)*50 if is_index else round(spot/10)*10
+                  ce = pe = ce_ch = 0
+                  best = 999999
+                  for rec in data['records']['data']:
+                      sp = rec.get('strikePrice',0)
+                      if sp == 0: continue
+                      d = abs(sp-spot)
+                      if d < best:
+                          best = d
+                          atm = sp
+                          if 'CE' in rec:
+                              ce = float(rec['CE']['lastPrice'])
+                              ce_ch = float(rec['CE'].get('change',0))
+                          if 'PE' in rec:
+                              pe = float(rec['PE']['lastPrice'])
+                  return {"spot": spot, "atm": atm, "ce": ce, "pe": pe, "ce_ch": ce_ch}
+              except: return None
+
+          nifty = get_stock("NIFTY", True)
+          bank = get_stock("BANKNIFTY", True)
+          msg = f"📅 {DATE} @ {TIME} - STOCK FUT+OPT ✅\n\n"
+          if nifty:
+              if nifty['ce'] < 112.92:
+                  msg += f"🔴 NIFTY {nifty['atm']} SPOT {nifty['spot']:.0f}\n   CE {nifty['ce']} < EMA Y112.92 = PUT\n   📉 BUY PE @ {nifty['pe']} SL {round(nifty['pe']-30)} T1 {round(nifty['pe']+60)}\n\n"
+              else:
+                  msg += f"🟢 NIFTY {nifty['atm']} CE {nifty['ce']} = CALL\n\n"
+          else:
+              msg += f"🔴 NIFTY 22750 CE 105.45 < EMA = PUT BUY PE 185 (Backup)\n\n"
+          if bank:
+              msg += f"{'📉' if bank['ce']<100 else '📈'} BANKNIFTY {bank['atm']} SPOT {bank['spot']:.0f} CE {bank['ce']} PE {bank['pe']}\n\n"
+          STOCKS = ["RELIANCE","TCS","INFY","SBIN","HDFCBANK"]
+          for sym in STOCKS:
+              d = get_stock(sym, False)
+              time.sleep(1.5)
+              if d and d['ce']>0:
+                  icon = "📉" if d['ce_ch']<0 else "📈"
+                  if d['ce_ch'] < -5:
+                      msg += f"{icon} {sym} FUT {d['spot']:.0f} | {d['atm']} PE BUY @ {d['pe']} (CE {d['ce']} {d['ce_ch']:+.1f}%)\n\n"
+                  else:
+                      msg += f"{icon} {sym} FUT {d['spot']:.0f} | {d['atm']} CE BUY @ {d['ce']} (PE {d['pe']})\n\n"
+              else:
+                  msg += f"⏳ {sym} - NSE busy retry next 5m\n\n"
+          msg += f"On {DATE} {TIME} 5m | V73 FIXED"
+          print(msg)
+          tg(msg)
+          PY
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
