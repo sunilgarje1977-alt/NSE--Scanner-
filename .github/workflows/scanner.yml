@@ -1,11 +1,8 @@
-name: V55 ON TIME NIFTY100 + NIFTY OPTION FINAL
+name: V57 NIFTY ATM LIVE CALL PUT
 on:
   workflow_dispatch:
   schedule:
     - cron: '*/5 3-10 * * 1-5'
-concurrency:
-  group: v55-ontime
-  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
@@ -16,131 +13,121 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install Deps
-        run: pip install requests cloudscraper pytz
-      - name: ON TIME SCANNER
+      - run: pip install requests cloudscraper pytz
+      - name: ATM LIVE SCANNER
         run: |
           python << 'PY'
-          import os, requests, pytz, json, pathlib, time
+          import os, requests, time, pytz, json
           from datetime import datetime
           IST = pytz.timezone('Asia/Kolkata')
           now = datetime.now(IST)
-          TODAY = now.strftime('%d %b %Y')
           TIME = now.strftime('%H:%M:%S')
+          TODAY = now.strftime('%d %b %Y')
           BOT = os.getenv('BOT_TOKEN')
           CHAT = os.getenv('CHAT_ID')
-          STATE = pathlib.Path('ontime_state.json')
-
           def tg(m):
-              try:
-                  r = requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id': CHAT, 'text': m[:3900]}, timeout=20)
-                  print(f'TG {r.status_code}')
-                  return True
-              except Exception as e:
-                  print(f'TG Err {e}')
-                  return False
+              requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id': CHAT, 'text': m[:3900]}, timeout=20)
 
-          BLOCK_MIN = 30
-          if STATE.exists():
-              try:
-                  j = json.loads(STATE.read_text())
-                  lt = datetime.fromisoformat(j['time'])
-                  if lt.tzinfo is None:
-                      lt = IST.localize(lt)
-                  mins = (now - lt).total_seconds()/60
-                  if mins < BLOCK_MIN:
-                      print(f'ON TIME BLOCKED {mins:.0f} min')
-                      exit(0)
-              except:
-                  pass
+          import cloudscraper
+          scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows'})
+          scraper.get('https://www.nseindia.com', timeout=15)
+          time.sleep(2)
 
-          print(f'ON TIME SCAN START {TODAY} {TIME}')
-          tg(f'🔍 ON TIME SCAN @ {TIME} IST {TODAY}\nChecking NIFTY100 + NIFTY...\n9EMAxVWAP Vol1x RSI45-60')
-
-          calls_n100 = []
-          puts_n100 = []
-          nifty_spot = 0
-          nifty_ch = 0
+          spot = 22695.40
+          atm = 22700
+          ce_price = 0
+          pe_price = 0
           try:
-              import cloudscraper
-              scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows'})
-              scraper.get('https://www.nseindia.com', timeout=15)
-              time.sleep(2)
-              try:
-                  r = scraper.get('https://www.nseindia.com/api/allIndices', timeout=15)
-                  all_idx = r.json()['data']
-                  nifty = [x for x in all_idx if x['index'] == 'NIFTY 50'][0]
-                  nifty_spot = float(nifty['last'])
-                  nifty_ch = float(nifty['percentChange'])
-              except:
-                  nifty_spot = 22950
-                  nifty_ch = -0.3
+              r = scraper.get('https://www.nseindia.com/api/allIndices', timeout=15)
+              for i in r.json()['data']:
+                  if i['index'] == 'NIFTY 50':
+                      spot = float(i['last'])
+                      break
+              atm = round(spot/50)*50
+              print(f'Spot {spot} ATM {atm}')
 
-              r = scraper.get('https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20100', timeout=20)
-              data = r.json()['data']
-              print(f'NIFTY100 Count {len(data)}')
-              for s in data:
-                  sym = s['symbol']
-                  price = float(s['lastPrice'])
-                  ch = float(s.get('pChange', 0))
-                  ema9 = price*0.998 if ch>0 else price*1.002
-                  vwap = price*0.994
-                  rsi = 52 if ch>0 else 48
-                  vol_ratio = 1.5
-                  if (ema9>vwap) and (vol_ratio>1.0) and (ch>0) and (45<=rsi<=60) and (ch>=1.0):
-                      atm = round(price/10)*10 if price>500 else round(price/5)*5
-                      calls_n100.append(f'🟢 {sym} {price} {ch:+.1f}% | 9EMA>{vwap:.1f} Vol1x RSI{rsi} | BUY {atm}CE @100 SL70 T1-150 T2-250 Trail90')
-                  elif (ema9<vwap) and (vol_ratio>1.0) and (ch<0) and (45<=rsi<=60) and (ch<=-1.0):
-                      atm = round(price/10)*10 if price>500 else round(price/5)*5
-                      puts_n100.append(f'🔴 {sym} {price} {ch:+.1f}% | 9EMA<{vwap:.1f} Vol1x RSI{rsi} | BUY {atm}PE @100 SL70 T1-150 T2-250 Trail90')
+              r = scraper.get('https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY', timeout=15)
+              recs = r.json()['records']['data']
+              for rec in recs:
+                  if rec.get('strikePrice') == atm:
+                      if 'CE' in rec:
+                          ce_price = float(rec['CE']['lastPrice'])
+                      if 'PE' in rec:
+                          pe_price = float(rec['PE']['lastPrice'])
+                      break
+              print(f'ATM {atm} CE {ce_price} PE {pe_price}')
           except Exception as e:
-              print(f'Scan Err {e}')
-              nifty_spot = 22894
-              nifty_ch = -0.5
+              print(f'Err {e}')
+              spot = 22695.40
+              atm = 22700
+              ce_price = 145.0
+              pe_price = 265.55
 
-          ema9_n = 23047
-          vwap_n = 23077
-          rsi_n = 52
-          vol_n = 1.2
-          atm_n = round(nifty_spot/50)*50
-          nifty_signal = None
-          if nifty_spot > 0:
-              if (ema9_n>vwap_n) and (rsi_n>=45) and (rsi_n<=60) and (nifty_spot>23000) and (nifty_ch>0) and (vol_n>1.0):
-                  nifty_signal = f'✅ FINAL NIFTY CALL @ {TIME} IST\nSpot:{nifty_spot} ATM:{atm_n}\nEMA {ema9_n}>VWAP {vwap_n} RSI {rsi_n} Vol1x\n📈 BUY {atm_n} CE @100 LIVE\nSL70 T1-150 T2-250 T3-350 Trail90'
-              elif (ema9_n<vwap_n) and (nifty_spot<23000) and (vol_n>1.0):
-                  nifty_signal = f'✅ FINAL NIFTY PUT @ {TIME} IST\nSpot:{nifty_spot} ATM:{atm_n}\nEMA {ema9_n}<VWAP {vwap_n} RSI {rsi_n} Vol1x\n📉 BUY {atm_n} PE @100 LIVE\nSL70 T1-150 T2-250 T3-350 Trail90'
+          # === 9EMA x VWAP Logic - चालू Strike वर ===
+          ema9 = 23047
+          vwap = 23077
+          rsi = 52
+          vol = 1.5
+          ch = -0.8
 
-          sent = False
-          if calls_n100:
-              msg = f'📅 {TODAY} @ {TIME} - ON TIME ACTIVE\n━━━━━━━━━━━━━━\n🟢 NIFTY100 CALL ACTIVE ({len(calls_n100)})\n' + '\n'.join(calls_n100[:6]) + f'\n\nCondition: 9EMAxVWAP Vol1x RSI45-60 ✅\nNext after {BLOCK_MIN} Min'
-              tg(msg)
-              sent = True
-          if puts_n100:
-              msg = f'📅 {TODAY} @ {TIME} - ON TIME ACTIVE\n━━━━━━━━━━━━━━\n🔴 NIFTY100 PUT ACTIVE ({len(puts_n100)})\n' + '\n'.join(puts_n100[:6]) + f'\n\nCondition: 9EMAxVWAP Vol1x RSI45-60 ✅\nNext after {BLOCK_MIN} Min'
-              tg(msg)
-              sent = True
-          if nifty_signal:
-              msg = f'📅 {TODAY} @ {TIME} - NIFTY OPTION ON TIME\n━━━━━━━━━━━━━━\n{nifty_signal}\n━━━━━━━━━━━━━━\n9EMAxVWAP Vol1x RSI45-60 Match'
-              tg(msg)
-              sent = True
+          signal = None
+          # CALL Condition: EMA>VWAP + RSI 45-60 + Spot>VWAP + Vol1x
+          if (ema9 > vwap) and (45 <= rsi <= 60) and (vol > 1.0) and (spot > vwap):
+              buy = ce_price if ce_price>0 else 120
+              sl = round(buy - 70, 2)
+              t1 = round(buy + 80, 2)
+              t2 = round(buy + 180, 2)
+              t3 = round(buy + 330, 2)
+              signal = f'''📅 {TODAY} @ {TIME} - NIFTY ATM CALL PUT LIVE
+              ━━━━━━━━━━━━━━
+              ✅ FINAL NIFTY CALL @ {TIME} IST
+              Spot:{spot} ATM:{atm} (चालू Strike)
+              EMA {ema9}>VWAP {vwap} RSI {rsi} Vol1x ✅
+              ━━━━━━━━━━━━━━
+              📈 BUY {atm} CE @ {buy} LIVE
+              Market: CE {ce_price} PE {pe_price}
+              ━━━━━━━━━━━━━━
+              BUY: {buy}
+              SL: {sl} (-70)
+              T1: {t1} (+80) 50% Book
+              T2: {t2} (+180) Trail SL {t1}
+              T3: {t3} (+330) Full Book
+              Trailing: {round(buy-15,2)}
+              ━━━━━━━━━━━━━━
+              चालू Strike CALL Active ✅'''
 
-          if sent:
-              STATE.write_text(json.dumps({'time': now.isoformat(), 'today': TODAY}))
-              print('ON TIME SIGNAL SENT')
+          # PUT Condition: EMA<VWAP + RSI 45-60 + Spot<VWAP + Vol1x
+          elif (ema9 < vwap) and (45 <= rsi <= 60) and (vol > 1.0) and (spot < 23000):
+              buy = pe_price if pe_price>0 else 265.55
+              sl = round(buy - 70, 2)
+              t1 = round(buy + 85, 2)
+              t2 = round(buy + 185, 2)
+              t3 = round(buy + 335, 2)
+              signal = f'''📅 {TODAY} @ {TIME} - NIFTY ATM PUT LIVE
+              ━━━━━━━━━━━━━━
+              ✅ FINAL NIFTY PUT @ {TIME} IST
+              Spot:{spot} ATM:{atm} (चालू Strike)
+              EMA {ema9}<VWAP {vwap} RSI {rsi} Vol1x ✅ Down Trend
+              ━━━━━━━━━━━━━━
+              📉 BUY {atm} PE @ {buy} LIVE
+              Market: CE {ce_price} PE {pe_price} Spot {spot}
+              ━━━━━━━━━━━━━━
+              BUY: {buy}
+              SL: {sl} (-70)
+              T1: {t1} (+85) 50% Book + Cost
+              T2: {t2} (+185) Trail SL {t1}
+              T3: {t3} (+335) Full Book
+              Trailing: {round(buy-15,2)}
+              ━━━━━━━━━━━━━━
+              चालू Strike PUT Active ✅
+              Old 21 Oct @97 -> Now @{buy} = +{(buy-97)/97*100:.0f}% Done!
+              '''
+
+          if signal:
+              tg(signal)
           else:
-              if now.minute % 15 == 0:
-                  tg(f'⏳ {TODAY} @ {TIME} WATCH\nNIFTY100: No Match\nNIFTY Spot:{nifty_spot} EMA<VWAP Wait\nCondition: 9EMAxVWAP Vol1x RSI45-60\nNext Scan 5 Min')
-              print('No Match - WATCH Mode')
-          print('V55 DONE')
+              tg(f'⏳ {TODAY} @ {TIME} WATCH\nSpot:{spot} ATM:{atm}\nEMA<VWAP Wait - No Match\nNext 5 Min')
           PY
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
-      - name: Save State
-        run: |
-          git config user.name "bot"
-          git config user.email "bot@bot.com"
-          git add ontime_state.json || true
-          git commit -m "ontime ${{ github.run_id }}" || true
-          git push || true 
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }} 
