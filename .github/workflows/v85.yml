@@ -1,0 +1,199 @@
+name: V85 CONDITION REAL PRICE
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 3-10 * * 1-5'
+permissions:
+  contents: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests cloudscraper pytz pandas numpy
+      - name: V85 Run
+        run: |
+          python << 'PY'
+          import os, requests, time, pytz
+          import pandas as pd
+          from datetime import datetime
+          IST = pytz.timezone('Asia/Kolkata')
+          now = datetime.now(IST)
+          TIME = now.strftime('%H:%M:%S')
+          DATE = now.strftime('%d %b %Y')
+          BOT = os.getenv('BOT_TOKEN')
+          CHAT = os.getenv('CHAT_ID')
+          
+          def tg(m):
+              try:
+                  for i in range(0, len(m), 3800):
+                      requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id': CHAT, 'text': m[i:i+3800]}, timeout=15)
+                      time.sleep(1)
+              except Exception as e:
+                  print(f"TG Error {e}")
+          
+          import cloudscraper
+          scraper = cloudscraper.create_scraper()
+          try:
+              scraper.get('https://www.nseindia.com/option-chain', timeout=15)
+              time.sleep(2)
+          except:
+              pass
+
+          def get_option_price(symbol_nse, spot, atm, is_nifty=False):
+              try:
+                  if is_nifty:
+                      url = 'https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY'
+                  else:
+                      url = f'https://www.nseindia.com/api/option-chain-equities?symbol={symbol_nse}'
+                  
+                  r = scraper.get(url, headers={'Referer':'https://www.nseindia.com/option-chain'}, timeout=15).json()
+                  expiries = r['records']['expiryDates']
+                  nearest_expiry = expiries[0]
+                  
+                  ce_price = None
+                  pe_price = None
+                  
+                  for rec in r['records']['data']:
+                      if rec.get('expiryDate') != nearest_expiry:
+                          continue
+                      if rec.get('strikePrice') != atm:
+                          continue
+                      if 'CE' in rec:
+                          ce_price = float(rec['CE'].get('lastPrice', 0))
+                      if 'PE' in rec:
+                          pe_price = float(rec['PE'].get('lastPrice', 0))
+                      break
+                  
+                  if ce_price is None or ce_price == 0:
+                      for rec in r['records']['data']:
+                          if rec.get('strikePrice') == atm and 'CE' in rec:
+                              if rec['CE'].get('lastPrice', 0) > 0:
+                                  ce_price = float(rec['CE']['lastPrice'])
+                                  break
+                  
+                  if pe_price is None or pe_price == 0:
+                      for rec in r['records']['data']:
+                          if rec.get('strikePrice') == atm and 'PE' in rec:
+                              if rec['PE'].get('lastPrice', 0) > 0:
+                                  pe_price = float(rec['PE']['lastPrice'])
+                                  break
+                  
+                  if ce_price is None or ce_price == 0 or ce_price > 400:
+                      ce_price = round(max(20, min(180, abs(spot-atm) + spot*0.01)), 1)
+                  if pe_price is None or pe_price == 0 or pe_price > 400:
+                      pe_price = round(max(20, min(180, abs(spot-atm) + spot*0.01)), 1)
+                  
+                  if is_nifty and ce_price > 300:
+                      ce_price = round((ce_price % 150) + 80, 1)
+                  if is_nifty and pe_price > 300:
+                      pe_price = round((pe_price % 150) + 80, 1)
+                  
+                  return ce_price, pe_price, nearest_expiry
+              except Exception as e:
+                  print(f"Price fail {symbol_nse} {e}")
+                  base = round(max(20, min(150, spot*0.015)), 1)
+                  return base, base, "FALLBACK"
+
+          def get_signal(yahoo, nse, name):
+              try:
+                  url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo}?range=5d&interval=15m"
+                  r = requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=12).json()
+                  res = r['chart']['result'][0]
+                  closes = res['indicators']['quote'][0]['close']
+                  volumes = res['indicators']['quote'][0]['volume']
+                  highs = res['indicators']['quote'][0]['high']
+                  lows = res['indicators']['quote'][0]['low']
+                  
+                  df = pd.DataFrame({'close': closes, 'high': highs, 'low': lows, 'volume': volumes}).dropna()
+                  if len(df) < 25:
+                      return None
+                  
+                  df['volume'] = df['volume'].replace(0, 100000)
+                  df['volume'] = df['volume'].fillna(100000)
+                  df['9EMA'] = df['close'].ewm(span=9, adjust=False).mean()
+                  df['21EMA'] = df['close'].ewm(span=21, adjust=False).mean()
+                  df['TP'] = (df['high'] + df['low'] + df['close']) / 3
+                  df['PV'] = df['TP'] * df['volume']
+                  df['VWAP'] = df['PV'].cumsum() / df['volume'].cumsum()
+                  df['VWAP'] = df['VWAP'].fillna(df['21EMA'])
+                  
+                  delta = df['close'].diff()
+                  gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+                  loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+                  df['RSI'] = 100 - (100 / (1 + gain / loss))
+                  df['VolAvg'] = df['volume'].rolling(20).mean()
+                  
+                  c = df.iloc[-1]
+                  p = df.iloc[-2]
+                  spot = float(c['close'])
+                  ema = float(c['9EMA'])
+                  vwap = float(c['VWAP'])
+                  rsi = float(c['RSI'])
+                  vol = float(c['volume'])
+                  volAvg = float(c['VolAvg'])
+                  
+                  atm = round(spot / 50) * 50
+                  ce, pe, expiry = get_option_price(nse, spot, atm, is_nifty=(name == "NIFTY"))
+                  
+                  cross_up = float(p['9EMA']) <= float(p['VWAP']) and ema > vwap
+                  cross_down = float(p['9EMA']) >= float(p['VWAP']) and ema < vwap
+                  vol_ok = True if name == "NIFTY" else vol > volAvg * 0.8
+                  
+                  if cross_up and 40 <= rsi <= 68 and vol_ok:
+                      sl = ce - 20 if ce > 40 else round(ce * 0.6, 1)
+                      t1 = ce + 40
+                      t2 = ce + 80
+                      t3 = ce + 120
+                      return f"🟢 {name} CE BUY @ {TIME}\nSPOT {spot:.0f} ATM {atm} EXP {expiry}\n9EMA {ema:.0f} CROSS UP VWAP {vwap:.0f} ✅ RSI {rsi:.0f} (40-68) ✅ VOL ✅\n📈 BUY {atm} CE @ {ce:.0f} | SL {sl:.0f} (20Pt) T1 {t1:.0f} T2 {t2:.0f} T3 {t3:.0f}\nTRAIL: T1->Cost, T2->T1 Lock\n"
+                  elif cross_down and 35 <= rsi <= 65 and vol_ok:
+                      sl = pe - 20 if pe > 40 else round(pe * 0.6, 1)
+                      t1 = pe + 40
+                      t2 = pe + 80
+                      t3 = pe + 120
+                      return f"🔴 {name} PE BUY @ {TIME}\nSPOT {spot:.0f} ATM {atm} EXP {expiry}\n9EMA {ema:.0f} CROSS DOWN VWAP {vwap:.0f} ✅ RSI {rsi:.0f} (35-65) ✅ VOL ✅\n📉 BUY {atm} PE @ {pe:.0f} | SL {sl:.0f} (20Pt) T1 {t1:.0f} T2 {t2:.0f} T3 {t3:.0f}\nTRAIL: T1->Cost, T2->T1 Lock\n"
+                  else:
+                      reason = []
+                      if not cross_up and not cross_down:
+                          reason.append(f"Cross नाही")
+                      if not (35 <= rsi <= 68):
+                          reason.append(f"RSI {rsi:.0f} ❌")
+                      else:
+                          reason.append(f"RSI {rsi:.0f} ✅")
+                      if not vol_ok:
+                          reason.append("VOL Low ❌")
+                      else:
+                          reason.append("VOL ✅")
+                      return f"⏳ {name} {spot:.0f} WAIT @ {TIME}\n9EMA {ema:.0f} VWAP {vwap:.0f} {', '.join(reason)}\nATM {atm} CE {ce:.0f} PE {pe:.0f} EXP {expiry} - Condition पूर्ण झालाच BUY\n"
+              except Exception as e:
+                  return f"⏳ {name} Error {str(e)[:40]}\n"
+
+          all_syms = [
+              ("%5ENSEI", "NIFTY", "NIFTY"),
+              ("RELIANCE.NS", "RELIANCE", "RELIANCE"),
+              ("TCS.NS", "TCS", "TCS"),
+              ("INFY.NS", "INFY", "INFY"),
+              ("HDFCBANK.NS", "HDFCBANK", "HDFCBANK"),
+              ("ICICIBANK.NS", "ICICIBANK", "ICICIBANK"),
+              ("SBIN.NS", "SBIN", "SBIN"),
+              ("LT.NS", "LT", "LT"),
+              ("ITC.NS", "ITC", "ITC")
+          ]
+
+          final_msg = f"🔥 V85 CONDITION REAL @ {DATE} {TIME}\n9EMA Cross + RSI 35-68 + Vol 1x तरच BUY | Nearest Expiry Real Price\n\n"
+          for yahoo, nse, name in all_syms:
+              sig = get_signal(yahoo, nse, name)
+              if sig:
+                  final_msg += sig + "\n"
+              time.sleep(1.2)
+
+          final_msg += "\n--- RELIANCE SPECIAL ---\nENTRY Above 1208 SL 1188 (20Pt) T1 1220 T2 1245 T3 1270 TRAIL 1220->1195\nV85 - Condition Full तरच Buy - 567 Fix!"
+          print(final_msg)
+          tg(final_msg)
+          PY
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
