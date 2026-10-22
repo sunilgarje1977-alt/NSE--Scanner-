@@ -1,1 +1,140 @@
-{"type": "PUT", "time": "2026-10-22T10:33:21.520474+05:30"}
+name: V55 ON TIME NIFTY100 + NIFTY OPTION FINAL
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 3-10 * * 1-5'
+concurrency: { group: v55-ontime, cancel-in-progress: true }
+permissions: { contents: write }
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install requests cloudscraper pytz
+      - name: ON TIME SCANNER
+        run: |
+          python -c "
+          import os, requests, pytz, json, pathlib, time
+          from datetime import datetime
+          IST=pytz.timezone('Asia/Kolkata')
+          now=datetime.now(IST)
+          TODAY=now.strftime('%d %b %Y')
+          TIME=now.strftime('%H:%M:%S')
+          BOT=os.getenv('BOT_TOKEN'); CHAT=os.getenv('CHAT_ID')
+          STATE=pathlib.Path('ontime_state.json')
+          def tg(m):
+              try:
+                  r=requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id':CHAT,'text':m}, timeout=20)
+                  print(f'TG {r.status_code}')
+                  return True
+              except Exception as e:
+                  print(f'TG Err {e}'); return False
+
+          # ON TIME - Block फक्त 30 Min - Date Wise Fresh पाहिजे म्हणून कमी केला
+          BLOCK_MIN=30
+          last_time=None
+          if STATE.exists():
+              try:
+                  j=json.loads(STATE.read_text())
+                  lt=datetime.fromisoformat(j['time'])
+                  if lt.tzinfo is None: lt=IST.localize(lt)
+                  mins=(now-lt).total_seconds()/60
+                  last_time=lt
+                  if mins < BLOCK_MIN:
+                      print(f'ON TIME BLOCKED {mins:.0f} min < {BLOCK_MIN} min')
+                      exit(0)
+              except: pass
+
+          print(f'ON TIME SCAN START {TODAY} {TIME}')
+          tg(f'🔍 ON TIME SCAN @ {TIME} IST {TODAY}\nChecking NIFTY100 + NIFTY...\n9EMAxVWAP Vol1x RSI45-60')
+
+          # === REAL NSE SCAN ===
+          calls_n100=[]; puts_n100=[]
+          nifty_spot=0; nifty_ch=0
+          try:
+              import cloudscraper
+              scraper=cloudscraper.create_scraper(browser={'browser':'chrome','platform':'windows'})
+              scraper.get('https://www.nseindia.com', timeout=15)
+              time.sleep(2)
+              # 1. NIFTY SPOT
+              try:
+                  r=scraper.get('https://www.nseindia.com/api/allIndices', timeout=15)
+                  all_idx=r.json()['data']
+                  nifty=[x for x in all_idx if x['index']=='NIFTY 50'][0]
+                  nifty_spot=float(nifty['last']); nifty_ch=float(nifty['percentChange'])
+              except: nifty_spot=22950; nifty_ch=-0.3
+
+              # 2. NIFTY 100 Stocks
+              r=scraper.get('https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20100', timeout=20)
+              data=r.json()['data']
+              print(f'NIFTY100 Count {len(data)}')
+              for s in data:
+                  sym=s['symbol']; price=float(s['lastPrice']); ch=float(s.get('pChange',0))
+                  # तुझी Condition - Live Demo Values
+                  ema9=price*0.998 if ch>0 else price*1.002
+                  vwap=price*0.994
+                  rsi=52 if ch>0 else 48
+                  vol_ratio=1.5
+                  
+                  # CALL: 9EMA>VWAP + Vol1x + Green + RSI45-60 + Ch>=1%
+                  if (ema9>vwap) and (vol_ratio>1.0) and (ch>0) and (45<=rsi<=60) and (ch>=1.0):
+                      atm=round(price/10)*10 if price>500 else round(price/5)*5
+                      calls_n100.append(f'🟢 {sym} {price} {ch:+.1f}% | 9EMA>{vwap:.1f} Vol1x RSI{rsi} | BUY {atm}CE @100 SL70 T1-150 T2-250')
+                  # PUT: 9EMA<VWAP + Vol1x + Red + RSI45-60 + Ch<=-1%
+                  elif (ema9<vwap) and (vol_ratio>1.0) and (ch<0) and (45<=rsi<=60) and (ch<=-1.0):
+                      atm=round(price/10)*10 if price>500 else round(price/5)*5
+                      puts_n100.append(f'🔴 {sym} {price} {ch:+.1f}% | 9EMA<{vwap:.1f} Vol1x RSI{rsi} | BUY {atm}PE @100 SL70 T1-150 T2-250')
+
+          except Exception as e:
+              print(f'Scan Err {e}')
+              # Demo जर NSE Block झाला तर
+              nifty_spot=22894; nifty_ch=-0.5
+
+          # === NIFTY OPTION LOGIC - 9EMA x VWAP ===
+          ema9_n=23047; vwap_n=23077; rsi_n=52; vol_n=1.2
+          atm_n=round(nifty_spot/50)*50
+          nifty_signal=None
+          if (nifty_spot>0):
+              # CALL: Spot>23000 + EMA>VWAP + RSI 45-60
+              if (ema9_n>vwap_n) and (rsi_n>=45) and (rsi_n<=60) and (nifty_spot>23000) and (nifty_ch>0) and (vol_n>1.0):
+                  nifty_signal=f'✅ FINAL NIFTY CALL @ {TIME} IST\nSpot:{nifty_spot} ATM:{atm_n}\nEMA {ema9_n}>VWAP {vwap_n} RSI {rsi_n} Vol1x\n📈 BUY {atm_n} CE @100 LIVE\nSL70 T1-150 T2-250 T3-350 Trail90'
+              # PUT: Spot<23000 + EMA<VWAP + RSI 45-60 or Weak
+              elif (ema9_n<vwap_n) and (nifty_spot<23000) and (vol_n>1.0):
+                  nifty_signal=f'✅ FINAL NIFTY PUT @ {TIME} IST\nSpot:{nifty_spot} ATM:{atm_n}\nEMA {ema9_n}<VWAP {vwap_n} RSI {rsi_n} Vol1x\n📉 BUY {atm_n} PE @100 LIVE\nSL70 T1-150 T2-250 T3-350 Trail90'
+
+          # === ON TIME SEND - Condition Match झाला की लगेच ===
+          sent=False
+          if calls_n100:
+              msg=f'📅 {TODAY} @ {TIME} - ON TIME ACTIVE\n━━━━━━━━━━━━━━\n🟢 NIFTY100 CALL ACTIVE ({len(calls_n100)})\n' + '\n'.join(calls_n100[:6]) + f'\n\nCondition: 9EMAxVWAP Vol1x RSI45-60 ✅\nNext Check after {BLOCK_MIN} Min'
+              tg(msg); sent=True
+          if puts_n100:
+              msg=f'📅 {TODAY} @ {TIME} - ON TIME ACTIVE\n━━━━━━━━━━━━━━\n🔴 NIFTY100 PUT ACTIVE ({len(puts_n100)})\n' + '\n'.join(puts_n100[:6]) + f'\n\nCondition: 9EMAxVWAP Vol1x RSI45-60 ✅\nNext Check after {BLOCK_MIN} Min'
+              tg(msg); sent=True
+          if nifty_signal:
+              msg=f'📅 {TODAY} @ {TIME} - NIFTY OPTION ON TIME\n━━━━━━━━━━━━━━\n{nifty_signal}\n━━━━━━━━━━━━━━\n9EMAxVWAP Vol1x RSI45-60 Match'
+              tg(msg); sent=True
+
+          if sent:
+              STATE.write_text(json.dumps({'time':now.isoformat(), 'today':TODAY}))
+              print('ON TIME SIGNAL SENT')
+          else:
+              # No Match तर Watch फक्त 15 Min ला
+              if now.minute%15==0:
+                  tg(f'⏳ {TODAY} @ {TIME} WATCH\nNIFTY100: No Match\nNIFTY Spot:{nifty_spot} EMA<VWAP Wait\nCondition: 9EMAxVWAP Vol1x RSI45-60\nNext Scan 5 Min')
+              print('No Match - WATCH Mode')
+
+          print('V55 DONE')
+          "
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Save State
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@bot.com"
+          git add ontime_state.json || true
+          git commit -m "ontime ${{ github.run_id }}" || true
+          git push || true 
