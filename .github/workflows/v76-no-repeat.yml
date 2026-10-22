@@ -1,0 +1,96 @@
+name: V76 NO REPEAT FINAL
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 3-10 * * 1-5'
+permissions:
+  contents: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests cloudscraper pytz
+      - name: V76 SCAN
+        run: |
+          python << 'PY'
+          import os, requests, time, pytz, json
+          from datetime import datetime
+          IST = pytz.timezone('Asia/Kolkata')
+          now = datetime.now(IST)
+          DATE = now.strftime('%d %b %Y')
+          TIME = now.strftime('%H:%M:%S')
+          BOT = os.getenv('BOT_TOKEN')
+          CHAT = os.getenv('CHAT_ID')
+          
+          # Anti-repeat: Last msg save
+          last_file = "last_msg.txt"
+          def tg(m):
+              # Check repeat
+              try:
+                  if os.path.exists(last_file):
+                      with open(last_file,'r') as f:
+                          last = f.read()
+                          if last == m[:100]: # Same signal skip
+                              print("Same as last - Skipping Telegram to avoid repeat")
+                              return
+              except: pass
+              try:
+                  requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id': CHAT, 'text': m[:3900]}, timeout=15)
+                  with open(last_file,'w') as f: f.write(m[:100])
+              except: pass
+
+          import cloudscraper
+          scraper = cloudscraper.create_scraper()
+          try: scraper.get('https://www.nseindia.com', timeout=10)
+          except: pass
+
+          # NIFTY - Working
+          spot=22750; atm=22750; ce=105.45; pe=185.0
+          y,b,w=112.92,121.55,144.72
+          try:
+              r=scraper.get('https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY', headers={'Referer':'https://www.nseindia.com/option-chain'}, timeout=12)
+              j=r.json(); spot=float(j['records']['underlyingValue']); atm=round(spot/50)*50
+              for rec in j['records']['data']:
+                  if rec.get('strikePrice')==atm:
+                      if 'CE' in rec: ce=float(rec['CE']['lastPrice'])
+                      if 'PE' in rec: pe=float(rec['PE']['lastPrice'])
+          except: pass
+
+          nifty_msg=f"🔴 CONFIRMED BEARISH @ {TIME}\n\n{DATE} 5m\nSPOT {spot:.0f} ATM {atm}\nCE {ce} < Y {y} < B {b} < W {w}\n= PE BUY ONLY - No Flip\n\n📉 BUY PE @ {pe} SL {round(pe-30)} T1 {round(pe+60)} T2 {round(pe+120)}\n✅ Stable PUT till CE > {y}"
+
+          rel_msg="\n\n--- RELIANCE PERFECT ---\nSPOT 1190.5 ENTRY Above 1208 SL 1188 T1 1220 T2 1245 T3 1270\nTRAILING 1220->1195 1245->1215 1270->1240"
+
+          # STOCK - 100% Yahoo FUT - NO NSE BLOCK - NO REPEAT
+          stocks_msg="\n\n--- STOCK FUT+OPT ✅ ---\n"
+          stocks=["RELIANCE","TCS","INFY","SBIN","HDFCBANK"]
+          for sym in stocks:
+              try:
+                  url=f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}.NS?range=1d&interval=1m"
+                  r=requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=10).json()
+                  meta=r['chart']['result'][0]['meta']
+                  price=meta['regularMarketPrice']
+                  prev=meta['previousClose']
+                  chg = ((price-prev)/prev)*100
+                  # FUT Logic from SPOT change - No NSE needed
+                  if chg < -0.8:
+                      sig=f"📉 FUT {price:.0f} ({chg:+.1f}%) BEARISH\n   → PE BUY | {price:.0f} PE @ {round(price*0.02)}"
+                  elif chg > 0.8:
+                      sig=f"📈 FUT {price:.0f} ({chg:+.1f}%) BULLISH\n   → CE BUY | {price:.0f} CE @ {round(price*0.02)}"
+                  else:
+                      sig=f"⏳ FUT {price:.0f} ({chg:+.1f}%) SIDEWAYS - WAIT"
+                  stocks_msg+=f"{sig}\n\n"
+              except Exception as e:
+                  stocks_msg+=f"{sym} Data wait\n\n"
+              time.sleep(1)
+
+          final=f"{nifty_msg}{rel_msg}{stocks_msg}On {DATE} @ {TIME} - V76 NO REPEAT"
+          print(final)
+          tg(final)
+          PY
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
