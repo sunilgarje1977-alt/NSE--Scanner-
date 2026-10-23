@@ -1,0 +1,177 @@
+name: V88 TUESDAY EXPIRY 5MIN
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 3-10 * * 1-5'
+permissions:
+  contents: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests pytz pandas numpy
+      - name: V88 TUESDAY
+        run: |
+          python << 'PY'
+          import os, requests, time, pytz
+          import pandas as pd
+          from datetime import datetime, timedelta
+          IST = pytz.timezone('Asia/Kolkata')
+          now = datetime.now(IST)
+          TIME = now.strftime('%H:%M:%S')
+          DATE = now.strftime('%d %b %Y')
+          BOT = os.getenv('BOT_TOKEN')
+          CHAT = os.getenv('CHAT_ID')
+          def tg(m):
+              try:
+                  for i in range(0, len(m), 3800):
+                      requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id': CHAT, 'text': m[i:i+3800]}, timeout=15)
+                      time.sleep(1)
+              except: pass
+
+          def get_tuesday_expiry():
+              # NSE New Rule - Tuesday Expiry
+              today = now.date()
+              # Tuesday = 1 (Monday 0)
+              days_ahead = 1 - today.weekday()
+              if days_ahead < 0:
+                  days_ahead += 7
+              elif days_ahead == 0:
+                  # Today Tuesday - if market closed, next Tuesday
+                  if now.hour >= 16:
+                      days_ahead = 7
+              next_tue = today + timedelta(days=days_ahead)
+              # Special: 27 Oct 2026 Tuesday - Monthly Last Tuesday
+              if next_tue.day == 27 and next_tue.month == 10:
+                  return "27 Oct 2026 (Monthly Expiry) - TUESDAY"
+              return next_tue.strftime('%d %b %Y (Tuesday)')
+
+          def get_price(spot, atm, is_nifty):
+              diff = abs(spot - atm)
+              if is_nifty:
+                  base = 100 + diff*0.5 + (spot*0.002)
+                  return round(max(60, min(200, base)), 0)
+              else:
+                  if spot < 500:
+                      base = max(5, spot*0.03 + diff*0.3)
+                  elif spot < 2000:
+                      base = max(15, spot*0.02 + diff*0.4)
+                  else:
+                      base = max(30, spot*0.015 + diff*0.5)
+                  return round(base, 0)
+
+          def get_signal(yahoo, name):
+              try:
+                  url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo}?range=2d&interval=5m"
+                  r = requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=12).json()
+                  res = r['chart']['result'][0]
+                  df = pd.DataFrame({
+                      'close': res['indicators']['quote'][0]['close'],
+                      'high': res['indicators']['quote'][0]['high'],
+                      'low': res['indicators']['quote'][0]['low'],
+                      'volume': res['indicators']['quote'][0]['volume']
+                  }).dropna()
+                  if len(df) < 30:
+                      return None
+                  df = df.tail(75)
+                  df['volume'] = df['volume'].replace(0, 100000).fillna(100000)
+                  df['9EMA'] = df['close'].ewm(span=9, adjust=False).mean()
+                  df['21EMA'] = df['close'].ewm(span=21, adjust=False).mean()
+                  df['TP'] = (df['high'] + df['low'] + df['close']) / 3
+                  df['PV'] = df['TP'] * df['volume']
+                  df['VWAP'] = df['PV'].cumsum() / df['volume'].cumsum()
+                  df['VWAP'] = df['VWAP'].fillna(df['21EMA'])
+                  delta = df['close'].diff()
+                  gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+                  loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+                  df['RSI'] = 100 - (100 / (1 + gain / loss))
+                  df['VolAvg'] = df['volume'].rolling(20).mean()
+                  c = df.iloc[-1]
+                  p = df.iloc[-2]
+                  pp = df.iloc[-3]
+                  spot = float(c['close'])
+                  ema = float(c['9EMA'])
+                  vwap = float(c['VWAP'])
+                  ema_p = float(p['9EMA'])
+                  vwap_p = float(p['VWAP'])
+                  ema_pp = float(pp['9EMA'])
+                  vwap_pp = float(pp['VWAP'])
+                  rsi = float(c['RSI'])
+                  vol = float(c['volume'])
+                  volAvg = float(c['VolAvg'])
+                  is_nifty = name == "NIFTY"
+                  atm = round(spot / 50) * 50 if is_nifty or spot > 1000 else round(spot / 10) * 10
+                  expiry = get_tuesday_expiry()
+                  ce_base = get_price(spot, atm, is_nifty)
+                  pe_base = get_price(spot, atm, is_nifty)
+                  if spot > atm:
+                      ce = round(ce_base * 0.7, 0)
+                      pe = round(pe_base * 1.3, 0)
+                  else:
+                      ce = round(ce_base * 1.3, 0)
+                      pe = round(pe_base * 0.7, 0)
+                  fresh_cross_up = (ema_p <= vwap_p and ema > vwap) or (ema_pp <= vwap_pp and ema_p > vwap_p)
+                  fresh_cross_down = (ema_p >= vwap_p and ema < vwap) or (ema_pp >= vwap_pp and ema_p < vwap_p)
+                  active_up = ema > vwap
+                  active_down = ema < vwap
+                  vol_ok = True if is_nifty else vol > volAvg * 0.6
+                  def sl_target(price, is_nifty):
+                      if is_nifty:
+                          sl = price - 20
+                          t1 = price + 40
+                          t2 = price + 80
+                          t3 = price + 120
+                          trail = f"TRAIL: T1->{price:.0f} Cost, T2->{t1:.0f} Lock +40"
+                          return sl, t1, t2, t3, trail
+                      else:
+                          if price < 20:
+                              sl = round(price * 0.6, 0)
+                              t1 = round(price * 1.8, 0)
+                              t2 = round(price * 2.5, 0)
+                              t3 = round(price * 3.5, 0)
+                              trail = f"TRAIL: T1->{price:.0f} Cost"
+                          else:
+                              sl = round(max(price*0.65, price-25), 0)
+                              t1 = round(price + 35, 0)
+                              t2 = round(price + 75, 0)
+                              t3 = round(price + 115, 0)
+                              trail = f"TRAIL: T1->{price:.0f} Cost, T2->{t1:.0f} Lock"
+                          return sl, t1, t2, t3, trail
+                  if (fresh_cross_up or active_up) and 40 <= rsi <= 75 and vol_ok and active_up:
+                      cross_txt = "FRESH CROSS UP - 5MIN TUESDAY ✅✅" if fresh_cross_up else "ACTIVE UP - 5MIN ✅"
+                      sl, t1, t2, t3, trail = sl_target(ce, is_nifty)
+                      return f"🟢 {name} CE BUY 5MIN @ {TIME}\nSPOT {spot:.0f} ATM {atm} EXP {expiry}\n9EMA {ema:.0f} {cross_txt} VWAP {vwap:.0f} RSI {rsi:.0f} VOL {vol/volAvg:.1f}x\n📈 BUY {atm} CE @ {ce:.0f}\nSL {sl:.0f} T1 {t1:.0f} T2 {t2:.0f} T3 {t3:.0f}\n{trail}\n"
+                  elif (fresh_cross_down or active_down) and 25 <= rsi <= 65 and vol_ok and active_down:
+                      cross_txt = "FRESH CROSS DOWN - 5MIN TUESDAY ✅✅" if fresh_cross_down else "ACTIVE DOWN - 5MIN ✅"
+                      sl, t1, t2, t3, trail = sl_target(pe, is_nifty)
+                      return f"🔴 {name} PE BUY 5MIN @ {TIME}\nSPOT {spot:.0f} ATM {atm} EXP {expiry}\n9EMA {ema:.0f} {cross_txt} VWAP {vwap:.0f} RSI {rsi:.0f} VOL {vol/volAvg:.1f}x\n📉 BUY {atm} PE @ {pe:.0f}\nSL {sl:.0f} T1 {t1:.0f} T2 {t2:.0f} T3 {t3:.0f}\n{trail}\n"
+                  else:
+                      return f"⏳ {name} {spot:.0f} WAIT 5MIN @ {TIME}\n9EMA {ema:.0f} {'UP' if ema>vwap else 'DOWN'} VWAP {vwap:.0f} | RSI {rsi:.0f} | VOL {vol/volAvg:.1f}x\nATM {atm} CE {ce:.0f} PE {pe:.0f} EXP {expiry}\n"
+              except Exception as e:
+                  return f"⏳ {name} Error {str(e)[:40]}\n"
+
+          all_syms = [
+              ("%5ENSEI", "NIFTY"),
+              ("RELIANCE.NS", "RELIANCE"),
+              ("TCS.NS", "TCS"),
+              ("INFY.NS", "INFY"),
+              ("LT.NS", "LT"),
+              ("SBIN.NS", "SBIN")
+          ]
+          final_msg = f"🔥 V88 TUESDAY EXPIRY 5MIN @ {DATE} {TIME}\nExpiry: {get_tuesday_expiry()} | 9EMA x VWAP 5Min Active | Interday\n\n"
+          for yahoo, name in all_syms:
+              sig = get_signal(yahoo, name)
+              if sig:
+                  final_msg += sig + "\n"
+              time.sleep(0.5)
+          final_msg += "\n---\nNSE New Rule: NIFTY/BANKNIFTY Expiry Every Tuesday\nNext Expiry: 27 Oct 2026 Tuesday (Monthly)"
+          print(final_msg)
+          tg(final_msg)
+          PY
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
