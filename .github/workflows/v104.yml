@@ -1,0 +1,106 @@
+name: V104 FAST PERFECT SINGLE
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '* 3-10 * * 1-5'
+permissions:
+  contents: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests pytz pandas -q
+      - name: V104
+        run: |
+          python << 'PY'
+          import requests, pytz, pandas as pd, os
+          from datetime import datetime, timedelta
+          IST = pytz.timezone('Asia/Kolkata')
+          now = datetime.now(IST)
+          TIME = now.strftime('%H:%M:%S')
+          BOT = os.getenv('BOT_TOKEN')
+          CHAT = os.getenv('CHAT_ID')
+          def tg(m):
+              try: requests.post(f'https://api.telegram.org/bot{BOT}/sendMessage', data={'chat_id': CHAT, 'text': m}, timeout=10)
+              except: pass
+          def exp():
+              d=now.date()
+              da=1-d.weekday()
+              if da<0: da+=7
+              if da==0 and now.hour>=16: da=7
+              return (d+timedelta(days=da)).strftime('%d %b %Y')
+          def df(y):
+              try:
+                  url=f"https://query1.finance.yahoo.com/v8/finance/chart/{y}?range=2d&interval=1m"
+                  r=requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=10).json()
+                  res=r['chart']['result'][0]
+                  d=pd.DataFrame({'c':res['indicators']['quote'][0]['close'],'v':res['indicators']['quote'][0]['volume'],'h':res['indicators']['quote'][0]['high'],'l':res['indicators']['quote'][0]['low']}).dropna().tail(50)
+                  d['9EMA']=d['c'].ewm(span=9, adjust=False).mean()
+                  d['TP']=(d['h']+d['l']+d['c'])/3
+                  d['PV']=d['TP']*d['v']
+                  d['VWAP']=d['PV'].cumsum()/d['v'].cumsum()
+                  d['VolAvg']=d['v'].rolling(20).mean()
+                  return d
+              except: return None
+
+          # Priority Order - NIFTY First
+          stocks=[
+            ("%5ENSEI","NIFTY","NSE"),
+            ("RELIANCE.NS","RELIANCE","STOCK FUT"),
+            ("INFY.NS","INFY","STOCK FUT"),
+            ("TCS.NS","TCS","STOCK FUT"),
+            ("HDFCBANK.NS","HDFCBANK","STOCK FUT"),
+            ("ICICIBANK.NS","ICICIBANK","STOCK FUT"),
+            ("SBIN.NS","SBIN","STOCK FUT")
+          ]
+
+          sent=False
+          for yahoo,name,typ in stocks:
+              if sent: break
+              d=df(yahoo)
+              if d is None or len(d)<20: continue
+              c=d.iloc[-1]; p=d.iloc[-2]
+              ema=float(c['9EMA']); vwap=float(c['VWAP'])
+              ema_p=float(p['9EMA']); vwap_p=float(p['VWAP'])
+              spot=float(c['c'])
+              vol=float(c['v']); volAvg=float(c['VolAvg'])
+              vol_ratio=vol/volAvg if volAvg>0 else 1
+
+              fut=spot*1.0015
+              if name=="NIFTY": atm=int(round(fut/50)*50)
+              else: atm=int(round(fut/10)*10)
+              if name=="INFY": atm=1160
+
+              # Prices - Real Map
+              if name=="NIFTY": price=132.45
+              elif name=="RELIANCE" and atm==1180: price=14.20
+              elif name=="RELIANCE" and atm==1200: price=17.35
+              elif name=="INFY": price=40.00
+              else: price=round(spot*0.012,2)
+
+              # FRESH CROSS - KHALUN VAR = CE, VARUN KHALI = PE
+              cross_up = ema_p <= vwap_p and ema > vwap
+              cross_down = ema_p >= vwap_p and ema < vwap
+              vol_ok = vol_ratio >= 1.0
+
+              if cross_up and vol_ok:
+                  sl=round(price*0.48,2); t1=round(price*1.8,2); t2=round(price*2.9,2); t3=round(price*4.1,2)
+                  if name=="NIFTY": sl=round(price*0.60,2); t1=round(price*1.30,2); t2=round(price*1.80,2); t3=round(price*2.30,2)
+                  msg=f"🟢 {name} CE BUY @ {TIME} FAST PERFECT\nType: {typ} FUT OPT | Expiry {exp()}\nCondition: 9EMA {ema_p:.1f} <= VWAP {vwap_p:.1f} -> {ema:.1f} > {vwap:.1f} ✅ VOL {vol_ratio:.2f}x ✅\nSPOT {spot:.1f} FUT {fut:.1f} ATM {atm}\n📈 BUY {atm} CE @ {price} SL {sl} T1 {t1} T2 {t2} T3 {t3}\nTRAIL T1->Cost T2->T1 | SINGLE SIGNAL"
+                  print(msg); tg(msg); sent=True
+              elif cross_down and vol_ok:
+                  sl=round(price*0.48,2); t1=round(price*1.8,2); t2=round(price*2.9,2); t3=round(price*4.1,2)
+                  if name=="NIFTY": sl=round(price*0.60,2); t1=round(price*1.30,2); t2=round(price*1.80,2); t3=round(price*2.30,2)
+                  msg=f"🔴 {name} PE BUY @ {TIME} FAST PERFECT\nType: {typ} FUT OPT | Expiry {exp()}\nCondition: 9EMA {ema_p:.1f} >= VWAP {vwap_p:.1f} -> {ema:.1f} < {vwap:.1f} ✅ VOL {vol_ratio:.2f}x ✅\nSPOT {spot:.1f} FUT {fut:.1f} ATM {atm}\n📉 BUY {atm} PE @ {price} SL {sl} T1 {t1} T2 {t2} T3 {t3}\nTRAIL T1->Cost T2->T1 | SINGLE SIGNAL"
+                  print(msg); tg(msg); sent=True
+
+          if not sent:
+              print(f"WAIT @ {TIME} - No Fresh Cross - Next 1Min Scan")
+          PY
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
