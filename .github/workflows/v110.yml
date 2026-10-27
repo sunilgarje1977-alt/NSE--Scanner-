@@ -1,0 +1,78 @@
+name: V110 FINAL
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/3 3-10 * * 1-5'
+permissions:
+  contents: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests pytz pandas -q
+      - name: Run Scanner
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python << 'PY'
+          import requests, pytz, pandas as pd, os
+          from datetime import datetime, timedelta
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+          from urllib.parse import quote
+          IST = pytz.timezone('Asia/Kolkata')
+          now = datetime.now(IST)
+          TIME = now.strftime('%H:%M:%S')
+          BOT = os.getenv('BOT_TOKEN')
+          CHAT = os.getenv('CHAT_ID')
+          STOCKS = ["360ONE","AARTIIND","AARTIDRUGS","AARTIPHARM","AARVEEDEN","AAVAS","ABAN","ABANS","ABBOTINDIA","ABB","ACE","ADANIENT","ADANIGREEN","ADANIPORTS","ADANIPOWER","ATGL","AWL","ABCAPITAL","ABFRL","ADORWELD","AEGISLOG","AETHER","AFFLE","AFIL","AGI","AIAENG","AJANTPHARM","AJMERA","AKZOINDIA","ALKYLAMINE","ALKEM","ALLCARGO","ABDL","ALPA","AMAL","AMARAJABAT","AMBALALSA","AMBER","AMBIKCO","AMBUJACEM","AMRUTANJAN","ANANDRATHI","ANANTRAJ","ANDHRAPAP","ANGELONE","ANJANIFAB","ANUP","APARINDS","APOLLOHOSP","APOLLO","APOLLOPIPES","APOLLOTYRE","APTECH","ARCHEAN","ARCHIES","ARCHIDPLY","ARMANFIN","AROGRANITE","ARROWGREEN","ARVIND","ARVINDFASN","ASAHIINDIA","ASHAPURMIN","ASHOKLEY","ASHOKA","ASTERDM","ASTRAMICRO","ASTRAL","ASTRON","ATUL","ATULAUTO","AUBANK","AURIONPRO","AUROPHARMA","AVADHSUGAR","AVANTIFEED","AVANTEL","DMART","AXISBANK","BAFNAPH","BAJAJ-AUTO","BAJAJCON","BAJAJELEC","BAJFINANCE","BAJAJFINSV","BAJAJHCARE","BJHL","BALAMINES","BALMLAWRIE","BALRAMCHIN","BANDHANBNK","BANKBARODA","BANKINDIA","MAHABANK","BANARISUG","BARBEQUE","BATAINDIA","BAYERCROP","BEML","BERGEPAINT","BDL","BEL","BHARATFORG","BHEL","BPCL","BHARATRAS","BHARTIARTL","BIOCON","BIRLACORPN","BSOFT","BLUEDART","BLUESTAR","BOMDYEING","BOROLTD","BOSCHLTD","BRIGADE","BRITANNIA","BSE","C2C","CAMPUS","CANBK","CANFINHOME","CAPLIPOINT","CARBORUNIV","CARERATING","CARYSIL","CASTROLIND","CELLO","CENTRALBK","CENTENKA","CENTURYPLY","CERA","CESC","CFF","CGPOWER","CHALET","CHAMBLFERT","CHEMPLASTS","CHENNPETRO","CHOLAFIN","CIPLA","CUB","CLEAN","COALINDIA","COFORGE","COCHINSHIP","COLPAL","CONCORDBIO","CONCOR","COROMANDEL","CRAFTSMAN","CREDITACC","CRISIL","CROMPTON","CSBBANK","CUMMINSIND","CYIENT","DABUR","DALBHARAT","DATAPATTNS","DBCORP","DCBBANK","DEEPAKFERT","DEEPAKNTR","DELHIVERY","DELTACORP","DEVYANI","DIVISLAB","DIXON","DLF","DRREDDY","DYNAMATECH","EICHERMOT","EIDPARRY","ELGIEQUIP","EMAMILTD","ENGINERSIN","EPL","EQUITASBNK","ESABINDIA","ESCORTS","EXIDEIND","FDC","FEDERALBNK","FINCABLES","FINPIPE","FSL","FISCHER","FIVE-STAR","FORCEMOT","FORTIS","GABRIEL","GRSE","GILLETTE","GLAND","GLENMARK","GODREJCP","GODREJIND","GODREJPROP","GRANULES","GRAPHITE","GRASIM","GUJALKALI","GUJFLUORO","GUJGASLTD","GNFC","GPPL","GULFOILLUB","HAPPSTMNDS","HATSUN","HAVELLS","HCLTECH","HDFCAMC","HDFCBANK","HDFCLIFE","HFCL","HAL","HINDCOPPER","HINDPETRO","HINDUNILVR","HINDZINC","HITACHI","HOMEFIRST","HONAUT","HUDCO","ICICIBANK","ICICIGI","ICICIPRULI","ISEC","IDEAFORGE","IDBI","IDFCFIRSTB","IEX","IFBIND","IIFL","INDIACEM","INDIANB","INDHOTEL","IOC","INDIAMART","INDIGOPNTS","INDUSINDBK","INDUSTOWER","INFY","INTELLECT","IPCALAB","IRB","IRFC","ITC","JKBANK","JBCHEPHARM","JSL","JINDALSTEL","JKCEMENT","JKLAKSHMI","JUBLFOOD","JUSTDIAL","JYOTHYLAB","KALYANKJIL","KANSAINER","KARURVYSYA","KAYNES","KEI","KFINTECH","KILITCH","KIMS","KNRCON","KOTAKBANK","KRISHNADEF","KPITTECH","KPRMILL","KRBL","LTF","LTTS","LAOPALA","LAURUSLABS","LEMONTREE","LICHSGFIN","LICI","LUPIN","M&MFIN","MGL","MAHSEAMLES","M&M","MANAPPURAM","MRPL","MAPMYINDIA","MARICO","MARKSANS","MARUTI","MAZDOCK","MEDPLUS","METROPOLIS","MINDACORP","MIDHANI","MOIL","MOTILALOFS","MSUMI","MPHASIS","MTARTECH","MUKAND","MUTHOOTFIN","MUTHOOTMF","NACLIND","NH","NATCOPHARM","NATIONALUM","NAVINFLUOR","NBCC","NCC","NEOGEN","NESTLEIND","NEULANDLAB","NETWORK18","NEWGEN","NIBE","NILKAMAL","NLCINDIA","NMDC","NOCIL","NTPCGREEN","NTPC","NUCLEUS","NUVAMA","NUVOCO","OBEROIRLTY","OIL","OLECTRA","PAYTM","ONGC","OSWALAGRO","PAGEIND","PAISALO","PANACEABIO","PARAGMILK","PARAS","PATANJALI","PBFINTECH","PCBL","PCJEWELLER","PGIL","PERSISTENT","PETRONET","PFIZER","PHOENIXLTD","PIDILITIND","PEL","PIRAMALPHARMA","PNBHOUSING","PNCINFRA","POLYMED","POLYCAB","POLYPLEX","POONAWALLA","PFC","POWERGRID","POWERMECH","PRAJIND","PRATAAPSNACK","PRECWIRE","PREMIERENE","PREMEXPLN","PRESTIGE","PRINCEPIPE","PRISMJOHNSN","PRIVISCL","PNB","PSB","PVRINOX","QUESS","QUICKHEAL","RRKABEL","RADICO","RVNL","RAILTEL","RAINBOW","RALLIS","RAMCOIND","RAMCOSYS","RKFORGE","RAJESHEXPO","RAJRATAN","RBLBANK","RECLTD","REDINGTON","REDTAPE","RELAXO","RELIANCE","RPOWER","RELIGARE","REPCOHOME","RESPONIND","RBA","RHIM","RITES","ROLEXRINGS","ROSSARI","ROSSELL","ROUTE","RPSGVENT","RSWM","RUPA","SADHNANIQ","SAFARI","SAILIFE","SALASAR","SAMHI","MOTHERSON","SANDHAR","SANGHVIMOV","SANGHIIND","SANOFI","SANSERA","SAPPHIRE","SARDAEN","SAREGAMA","SASKEN","SATIA","SBICARD","SBILIFE","SCHNEIDER","SEAMEC","SEQUENT","SERVOTECH","SHAKTIPUMP","SHALBY","SHANKARA","SHANTIGEAR","SHARDACROP","SHARDAMOTR","SHAREINDIA","SHEELA","SHILPAMED","SHIVALIK","SHOP","SHREECEM","RENUKA","SHYAMMETL","SIEMENS","SIKA","SIS","SJVN","SKFINDIA","SOBHA","SOLARINDS","SOLEX","SOMANY","SONACOMS","SONATSOFTW","SOUTHBANK","SPANDANA","STARCEMENT","STARHEALTH","SBIN","SAIL","STLTECH","STERLING","STOVEKRAFT","STAR","SUDARSCHEM","SUNPHARMA","SUNTV","SUNDRMFAST","SUNFLAG","SUVENPHARM","SUPRAJIT","SUPREMEIND","SUPPETRO","SURYAROSNI","SURYODAY","SWANENERGY","SWARAJENG","SWIGGY","SYMPHONY","SYNGENE","TANEJAERO","TATACHEM","TATACOMM","TCS","TATACONSUM","TATAELXSI","TATAMOTORS","TATAPOWER","TATASTEEL","TTML","TCIEXP","TECHM","TEJASNET","TEXRAIL","RAMCOCEM","THEMISMED","THERMAX","THOMASCOOK","THYROCARE","TIMETECHNO","TIMKEN","TITAN","TORNTPOWER","TORNTPHARM","TRENT","TRIVENI","TRITURBINE","TIINDIA","TV18BRDCST","TVSMOTOR","TVSSRICHAK","UCOBANK","UFLEX","UGROCAP","UJJIVAN","UJJIVANSFB","ULTRACEMCO","UNIONBANK","UBL","MCDOWELL-N","UNOMINDA","UPL","USHAMART","UTKARSHBNK","V2RETAIL","VAATECH","VAIBHAVGBL","VAKRANGEE","VARROC","VBL","VTL","VEDL","VGUARD","VIJAYA","VINDHYATEL","VIPIND","VMM","VISHNU","VOLTAS","VSTIND","VSTTILLERS","WAAREEENER","WAAREERTL","WEBSOL","WELCORP","WELSPUNIND","WELSPUNLIV","WESTLIFE","WHEELS","WHIRLPOOL","WINDLAS","WIPRO","WOCKHARDT","WONDERLA","YATHARTH","YESBANK","ZAGGLE","ZEEL","ZENSAR","ZOMATO","ZOTA","ZYDUSLIFE","ZYDUSWELL"]
+          def tg(m):
+              try: requests.post(f"https://api.telegram.org/bot{BOT}/sendMessage", data={"chat_id": CHAT, "text": m}, timeout=10)
+              except: pass
+          def exp():
+              d=now.date(); da=1-d.weekday()
+              if da<0: da+=7
+              if da==0 and now.hour>=16: da=7
+              return (d+timedelta(days=da)).strftime('%d %b %Y')
+          def get_df(y):
+              try:
+                  ys=quote(y, safe=''); url=f"https://query1.finance.yahoo.com/v8/finance/chart/{ys}.NS?range=2d&interval=1m"
+                  r=requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=8).json()
+                  if 'chart' not in r or r['chart']['result'] is None: return None
+                  res=r['chart']['result'][0]
+                  q=res['indicators']['quote'][0]
+                  df=pd.DataFrame({'c':q['close'],'v':q['volume'],'h':q['high'],'l':q['low']}).dropna().tail(80)
+                  if len(df)<30: return None
+                  df['9EMA']=df['c'].ewm(span=9,adjust=False).mean()
+                  df['15EMA']=df['c'].ewm(span=15,adjust=False).mean()
+                  df['TP']=(df['h']+df['l']+df['c'])/3
+                  df['PV']=df['TP']*df['v']
+                  df['VWAP']=df['PV'].cumsum()/df['v'].cumsum()
+                  return df
+              except: return None
+          def process(s):
+              df=get_df(s)
+              if df is None: return None
+              e9=df['9EMA'].iloc[-1]; e15=df['15EMA'].iloc[-1]; vw=df['VWAP'].iloc[-1]
+              pe9=df['9EMA'].iloc[-2]; pe15=df['15EMA'].iloc[-2]; pvw=df['VWAP'].iloc[-2]
+              ltp=df['c'].iloc[-1]
+              buy=(e9>e15 and pe9<=pe15) and (e9>vw and pe9<=pvw)
+              sell=(e9<e15 and pe9>=pe15) and (e9<vw and pe9>=pvw)
+              if buy: return f"🟢 {s} BUY @ {ltp:.2f} ACTIVE\n9EMA Cross UP 15EMA + VWAP ✅\nTime: {TIME} IST\nExp: {exp()}"
+              if sell: return f"🔴 {s} SELL @ {ltp:.2f} ACTIVE\n9EMA Cross DOWN 15EMA + VWAP ✅\nTime: {TIME} IST\nExp: {exp()}"
+              return None
+          msgs=[]
+          with ThreadPoolExecutor(max_workers=25) as ex:
+              futs={ex.submit(process,s):s for s in STOCKS}
+              for f in as_completed(futs):
+                  try:
+                      r=f.result()
+                      if r: msgs.append(r)
+                  except: pass
+          if msgs:
+              for m in msgs[:25]: tg(m)
+          PY
