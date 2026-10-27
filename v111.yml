@@ -1,0 +1,55 @@
+name: V111
+on: workflow_dispatch
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests pytz pandas -q
+      - name: Run
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python << 'PY'
+          import requests, pytz, pandas as pd, os
+          from datetime import datetime
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+          from urllib.parse import quote
+          IST = pytz.timezone('Asia/Kolkata')
+          TIME = datetime.now(IST).strftime('%H:%M:%S')
+          BOT = os.getenv('BOT_TOKEN')
+          CHAT = os.getenv('CHAT_ID')
+          STOCKS = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","BAJFINANCE"]
+          def tg(m):
+              requests.post(f"https://api.telegram.org/bot{BOT}/sendMessage", data={"chat_id": CHAT, "text": m}, timeout=10)
+          def check(s):
+              try:
+                  url = f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(s, safe='')}.NS?range=2d&interval=1m"
+                  r = requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=8).json()
+                  q = r['chart']['result'][0]['indicators']['quote'][0]
+                  df = pd.DataFrame({'c': q['close'], 'v': q['volume'], 'h': q['high'], 'l': q['low']}).dropna().tail(50)
+                  df['9EMA'] = df['c'].ewm(span=9).mean()
+                  df['15EMA'] = df['c'].ewm(span=15).mean()
+                  df['TP'] = (df['h']+df['l']+df['c'])/3
+                  df['PV'] = df['TP']*df['v']
+                  df['VWAP'] = df['PV'].cumsum()/df['v'].cumsum()
+                  e9, e15, vw = df['9EMA'].iloc[-1], df['15EMA'].iloc[-1], df['VWAP'].iloc[-1]
+                  pe9, pe15, pvw = df['9EMA'].iloc[-2], df['15EMA'].iloc[-2], df['VWAP'].iloc[-2]
+                  ltp = df['c'].iloc[-1]
+                  if e9>e15 and pe9<=pe15 and e9>vw and pe9<=pvw: return f"🟢 {s} BUY @ {ltp:.2f}"
+                  if e9<e15 and pe9>=pe15 and e9<vw and pe9>=pvw: return f"🔴 {s} SELL @ {ltp:.2f}"
+              except: return None
+          msgs=[]
+          with ThreadPoolExecutor(max_workers=10) as ex:
+              for f in as_completed([ex.submit(check, s) for s in STOCKS]):
+                  r=f.result()
+                  if r: msgs.append(r)
+          if msgs:
+              for m in msgs: tg(m)
+          else:
+              tg(f"✅ V111 OK {TIME} IST - Working - No Cross Now")
+          PY
