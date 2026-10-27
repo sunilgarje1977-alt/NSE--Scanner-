@@ -1,8 +1,8 @@
-name: V107 NIFTY PRIORITY ACTIVE
+name: V107 NIFTY PRIORITY ACTIVE - 566 STOCKS
 on:
   workflow_dispatch:
   schedule:
-    - cron: '* 3-10 * * 1-5'
+    - cron: '*/3 3-10 * * 1-5'
 permissions:
   contents: write
 jobs:
@@ -14,7 +14,10 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests pytz pandas -q
-      - name: V107
+      - name: Run V107 566 Scanner
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           python << 'PY'
           import requests, pytz, pandas as pd, os
@@ -35,67 +38,26 @@ jobs:
               return (d+timedelta(days=da)).strftime('%d %b %Y')
           def get_df(y):
               try:
-                  url=f"https://query1.finance.yahoo.com/v8/finance/chart/{y}?range=2d&interval=1m"
+                  url=f"https://query1.finance.yahoo.com/v8/finance/chart/{y}.NS?range=2d&interval=1m"
                   r=requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=10).json()
                   res=r['chart']['result'][0]
                   df=pd.DataFrame({'c':res['indicators']['quote'][0]['close'],'v':res['indicators']['quote'][0]['volume'],'h':res['indicators']['quote'][0]['high'],'l':res['indicators']['quote'][0]['low']}).dropna().tail(80)
-                  df['9EMA']=df['c'].ewm(span=9, adjust=False).mean()
+                  df['9EMA']=df['c'].ewm(span=9,adjust=False).mean()
+                  df['15EMA']=df['c'].ewm(span=15,adjust=False).mean()
                   df['TP']=(df['h']+df['l']+df['c'])/3
                   df['PV']=df['TP']*df['v']
                   df['VWAP']=df['PV'].cumsum()/df['v'].cumsum()
-                  df['VolAvg']=df['v'].rolling(20).mean()
                   return df
               except: return None
-
-          # NIFTY FIRST PRIORITY - ACTIVE SIGNAL
-          stocks=[
-            ("%5ENSEI","NIFTY","NIFTY FUTURE"),
-            ("RELIANCE.NS","RELIANCE","SHARE FUTURE"),
-            ("INFY.NS","INFY","SHARE FUTURE"),
-            ("TCS.NS","TCS","SHARE FUTURE"),
-            ("HDFCBANK.NS","HDFCBANK","SHARE FUTURE"),
-          ]
-
-          nifty_signal=None
-          other_signal=None
-
-          for yahoo,name,typ in stocks:
-              df=get_df(yahoo)
-              if df is None: continue
-              c=df.iloc[-1]; p=df.iloc[-2]
-              ema=float(c['9EMA']); vwap=float(c['VWAP'])
-              ema_p=float(p['9EMA']); vwap_p=float(p['VWAP'])
-              spot=float(c['c']); vol=float(c['v']); volAvg=float(c['VolAvg'])
-              vol_ratio=vol/volAvg if volAvg>0 else 0
-              fut=spot*1.0018 if name=="NIFTY" else spot*1.0012
-              atm=int(round(fut/50)*50) if name=="NIFTY" else int(round(fut/20)*20) if name in ["RELIANCE","HDFCBANK"] else int(round(fut/10)*10)
-              if name=="INFY": atm=1160
-              price=132.45 if name=="NIFTY" else 9.50 if name=="RELIANCE" and atm==1180 else 17.35 if name=="RELIANCE" else 40.00 if name=="INFY" else round(spot*0.012,2)
-
-              cross_up = ema_p <= vwap_p and ema > vwap
-              cross_down = ema_p >= vwap_p and ema < vwap
-              # NIFTY साठी VOL 0.8x पण चालेल - Active Signal साठी
-              vol_ok = vol_ratio >= 0.8 if name=="NIFTY" else vol_ratio >= 1.0
-
-              if (cross_up or cross_down) and vol_ok:
-                  side="CE" if cross_up else "PE"
-                  sl=round(price*0.60,2) if name=="NIFTY" else round(price*0.48,2)
-                  t1=round(price*1.30,2) if name=="NIFTY" else round(price*1.80,2)
-                  t2=round(price*1.80,2) if name=="NIFTY" else round(price*2.90,2)
-                  t3=round(price*2.30,2) if name=="NIFTY" else round(price*4.10,2)
-                  emoji="🟢" if cross_up else "🔴"
-                  msg=f"{emoji} {name} {side} BUY @ {TIME} ACTIVE\n{typ} | FUT {fut:.1f} | ATM {atm} ✅\n9EMA {ema_p:.1f} -> {ema:.1f} VWAP {vwap_p:.1f} -> {vwap:.1f} VOL {vol_ratio:.2f}x ✅\nSPOT {spot:.1f} FUT {fut:.1f} ATM {atm} EXP {exp()}\n{'📈' if cross_up else '📉'} BUY {atm} {side} @ {price} SL {sl} T1 {t1} T2 {t2} T3 {t3}\nTRAIL T1->Cost T2->T1 | NIFTY ACTIVE SIGNAL"
-                  if name=="NIFTY": nifty_signal=msg
-                  else: other_signal=msg
-
-          # PRIORITY: NIFTY FIRST!
-          if nifty_signal:
-              print(nifty_signal); tg(nifty_signal)
-          elif other_signal:
-              print(other_signal); tg(other_signal)
-          else:
-              print(f"WAIT @ {TIME} - Market Closed? 9:15 After NIFTY Active Yenar")
-          PY
-        env:
-          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          from stocks_566 import STOCKS_566
+          for sym in STOCKS_566:
+              df=get_df(sym)
+              if df is None or len(df)<30: continue
+              e9=df['9EMA'].iloc[-1]; e15=df['15EMA'].iloc[-1]; vwap=df['VWAP'].iloc[-1]
+              pe9=df['9EMA'].iloc[-2]; pe15=df['15EMA'].iloc[-2]; pvwap=df['VWAP'].iloc[-2]
+              ltp=df['c'].iloc[-1]
+              buy = (e9 > e15 and pe9 <= pe15) and (e9 > vwap and pe9 <= pvwap)
+              sell = (e9 < e15 and pe9 >= pe15) and (e9 < vwap and pe9 >= pvwap)
+              if buy: tg(f"🟢 {sym} BUY @ {ltp:.2f} ACTIVE\n9EMA Cross UP 15EMA + VWAP ✅\nTime: {TIME} IST\nExp: {exp()}")
+              if sell: tg(f"🔴 {sym} SELL @ {ltp:.2f} ACTIVE\n9EMA Cross DOWN 15EMA + VWAP ✅\nTime: {TIME} IST\nExp: {exp()}")
+          PY 
