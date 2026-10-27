@@ -1,0 +1,33 @@
+name: V108 NIFTY 566 STOCKS ULTRA FAST FINAL
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/3 3-10 * * 1-5'
+permissions:
+  contents: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests pytz pandas -q
+      - name: Run V108 Scanner
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python << 'PY'
+          import requests, pytz, pandas as pd, os
+          from datetime import datetime, timedelta
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+          from urllib.parse import quote
+          IST = pytz.timezone('Asia/Kolkata')
+          now = datetime.now(IST)
+          TIME = now.strftime('%H:%M:%S')
+          BOT = os.getenv('BOT_TOKEN')
+          CHAT = os.getenv('CHAT_ID')
+          
+          STOCKS_566 = ["360ONE","AARTIIND","AARTIDRUGS","AARTIPHARM","AARVEEDEN","AAVAS","ABAN","ABANS","ABBOTINDIA","ABB","ACE","ADAN
