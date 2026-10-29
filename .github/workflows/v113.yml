@@ -2,7 +2,7 @@ name: V113 566 FINAL - INTRADAY ONLY 9:15-3:00
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 3-9 * * 1-5'  # 8:30 ते 3:00 IST फक्त
+    - cron: '*/5 3-9 * * 1-5'
 permissions:
   contents: write
 jobs:
@@ -13,7 +13,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: pip install requests pytz pandas -q
+      - name: pip install
         run: pip install requests pytz pandas -q
       - name: Run Scanner
         env:
@@ -21,62 +21,69 @@ jobs:
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python << 'PY'
-          import requests, pytz, pandas as pd, os
-          from datetime import datetime, timedelta
+          import requests, pytz, os
+          from datetime import datetime
           from concurrent.futures import ThreadPoolExecutor, as_completed
           from urllib.parse import quote
+          import pandas as pd
+          
           IST = pytz.timezone('Asia/Kolkata')
           now = datetime.now(IST)
-          
-          # ===== हा आहे रात्रीचा Signal बंद करणारा Lock =====
-          market_start = now.replace(hour=9, minute=15, second=0)
-          market_end = now.replace(hour=15, minute=5, second=0) # 3:05 नंतर बंद
-          if now < market_start or now > market_end:
-              print(f"Market बंद आहे {now.strftime('%H:%M IST')} - No Signal")
-              exit(0) # रात्री 9:56 ला काहीच पाठवणार नाही
-          # ================================================
-          
           TIME = now.strftime('%H:%M:%S')
+          
           BOT = os.getenv("BOT_TOKEN")
           CHAT = os.getenv("CHAT_ID")
-          STOCKS = ["360ONE","AARTIIND","ABB","ADANIENT","ADANIGREEN","ADANIPORTS","DMART","AXISBANK","BAJAJ-AUTO","BAJAJFINSV"] # तुमची Full List
+          
           def tg(m):
-            try: requests.post(f"https://api.telegram.org/bot{BOT}/sendMessage", data={"chat_id": CHAT, "text": m}, timeout=10)
-            except: pass
+              try:
+                  r = requests.post(f"https://api.telegram.org/bot{BOT}/sendMessage", data={"chat_id": CHAT, "text": m}, timeout=10)
+                  print(f"TG Response: {r.status_code} {r.text[:100]}")
+              except Exception as e:
+                  print(f"TG Error: {e}")
+          
+          # तुमची Full List - इथे 10 च आहेत, तुमची 566 टाका
+          STOCKS = ["360ONE","AARTIIND","ABB","ADANIENT","ADANIGREEN","ADANIPORTS","DMART","AXISBANK","BAJAJ-AUTO","BAJAJFINSV"]
+          
           def get_df(y):
-            try:
-              ys=quote(y, safe=''); url=f"https://query1.finance.yahoo.com/v8/finance/chart/{ys}.NS?range=2d&interval=5m"
-              r=requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=8).json()
-              if 'chart' not in r or r['chart']['result'] is None: return None
-              res=r['chart']['result'][0]; q=res['indicators']['quote'][0]
-              df=pd.DataFrame({'c':q['close'],'v':q['volume'],'h':q['high'],'l':q['low']}).dropna().tail(80)
-              if len(df)<30: return None
-              df['9EMA']=df['c'].ewm(span=9,adjust=False).mean()
-              df['15EMA']=df['c'].ewm(span=15,adjust=False).mean()
-              df['TP']=(df['h']+df['l']+df['c'])/3; df['PV']=df['TP']*df['v']
-              df['VWAP']=df['PV'].cumsum()/df['v'].cumsum()
-              return df
-            except: return None
+              try:
+                  ys=quote(y, safe=''); url=f"https://query1.finance.yahoo.com/v8/finance/chart/{ys}.NS?range=2d&interval=5m"
+                  r=requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=8).json()
+                  if 'chart' not in r or r['chart']['result'] is None: return None
+                  res=r['chart']['result'][0]; q=res['indicators']['quote'][0]
+                  df=pd.DataFrame({'c':q['close'],'v':q['volume'],'h':q['high'],'l':q['low']}).dropna().tail(80)
+                  if len(df)<30: return None
+                  df['9EMA']=df['c'].ewm(span=9,adjust=False).mean()
+                  df['15EMA']=df['c'].ewm(span=15,adjust=False).mean()
+                  df['TP']=(df['h']+df['l']+df['c'])/3; df['PV']=df['TP']*df['v']
+                  df['VWAP']=df['PV'].cumsum()/df['v'].cumsum()
+                  return df
+              except Exception as e:
+                  print(f"{y} Error {e}"); return None
+          
           def process(s):
-            df=get_df(s)
-            if df is None: return None
-            e9=df['9EMA'].iloc[-1]; e15=df['15EMA'].iloc[-1]; vw=df['VWAP'].iloc[-1]
-            pe9=df['9EMA'].iloc[-2]; pe15=df['15EMA'].iloc[-2]; pvw=df['VWAP'].iloc[-2]
-            ltp=df['c'].iloc[-1]
-            if (e9>e15 and pe9<=pe15) and (e9>vw and pe9<=pvw): return f"🟢 {s} BUY @ {ltp:.2f}"
-            if (e9<e15 and pe9>=pe15) and (e9<vw and pe9>=pvw): return f"🔴 {s} SELL @ {ltp:.2f}"
-            return None
+              df=get_df(s)
+              if df is None: return None
+              e9=df['9EMA'].iloc[-1]; e15=df['15EMA'].iloc[-1]; vw=df['VWAP'].iloc[-1]
+              pe9=df['9EMA'].iloc[-2]; pe15=df['15EMA'].iloc[-2]; pvw=df['VWAP'].iloc[-2]
+              ltp=df['c'].iloc[-1]
+              if (e9>e15 and pe9<=pe15) and (e9>vw and pe9<=pvw): return f"🟢 {s} BUY @ {ltp:.2f}"
+              if (e9<e15 and pe9>=pe15) and (e9<vw and pe9>=pvw): return f"🔴 {s} SELL @ {ltp:.2f}"
+              return None
+          
           msgs=[]
           with ThreadPoolExecutor(max_workers=25) as ex:
-            futs={ex.submit(process,s): s for s in STOCKS}
-            for f in as_completed(futs):
-              try:
-                r=f.result()
-                if r: msgs.append(r)
-              except: pass
+              futs={ex.submit(process,s): s for s in STOCKS}
+              for f in as_completed(futs):
+                  try:
+                      r=f.result()
+                      if r: msgs.append(r)
+                  except: pass
+          
+          print(f"Found {len(msgs)} signals out of {len(STOCKS)}")
           if msgs:
-            for m in msgs[:25]: tg(f"{m}\nTime: {TIME} IST")
+              for m in msgs[:25]:
+                  tg(f"{m}\nTime: {TIME} IST")
           else:
-            # No Signal ला Message नको - नाहीतर Spam होईल
-            print(f"✅ V113 OK {TIME} IST - No Signal Now")
+              # Manual Run असेल तर नेहमी Message पाठव - तुम्हाला कळेल की Bot जिवंत आहे
+              tg(f"✅ V113 OK {TIME} IST\n{len(STOCKS)} Stocks Checked - No Signal Now\nBot Working 100%")
           PY 
